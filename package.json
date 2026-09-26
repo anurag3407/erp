@@ -23,6 +23,7 @@
   "dependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@upstash/redis": "^1.39.0",
     "crypto": "^1.0.1",
     "drizzle-orm": "^0.38.4",
     "lucide-react": "^1.48.0",

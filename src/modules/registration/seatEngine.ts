@@ -9,9 +9,10 @@ import { redis } from '../../lib/redis.js';
 export class SeatReservationEngine {
   private static LUA_SEAT_RESERVATION_SCRIPT = `
     local seats = redis.call('GET', KEYS[1])
-    if tonumber(seats) > 0 then
+    if seats and tonumber(seats) > 0 then
         redis.call('DECR', KEYS[1])
-        redis.call('SETEX', KEYS[2], 300, ARGV[1]) -- 5-minute (300s) cart hold
+        local holdSeconds = tonumber(ARGV[2]) or 300
+        redis.call('SETEX', KEYS[2], holdSeconds, ARGV[1]) -- Cart hold
         return 1
     end
     return 0
