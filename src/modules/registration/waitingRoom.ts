@@ -21,7 +21,15 @@ export class WaitingRoomService {
 
   constructor(maxConcurrentActive: number = 500, secret?: string) {
     this.maxConcurrentActive = maxConcurrentActive;
-    this.secret = secret || process.env.WAITING_ROOM_SECRET || 'waiting-room-hmac-secret-2026';
+    const configured = secret || process.env.WAITING_ROOM_SECRET;
+    if (configured) {
+      this.secret = configured;
+    } else if (process.env.NODE_ENV === 'production') {
+      // A predictable fallback would let anyone mint valid admission tokens.
+      throw new Error('WAITING_ROOM_SECRET must be set in production.');
+    } else {
+      this.secret = 'waiting-room-hmac-secret-2026';
+    }
   }
 
   /**

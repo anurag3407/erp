@@ -5,7 +5,27 @@ import crypto from 'node:crypto';
  * Provides HMAC-SHA256, Ed25519 digital signatures, and token hashing.
  */
 
-const DEFAULT_SECRET = process.env.ERP_CRYPTO_SECRET || 'erp-super-secret-cryptographic-salt-2026';
+const DEV_FALLBACK_SECRET = 'erp-super-secret-cryptographic-salt-2026';
+
+/**
+ * Resolve the institutional HMAC/derivation secret.
+ *
+ * A hard-coded fallback is convenient in development but catastrophic in
+ * production: anyone reading the source could forge queue tokens and
+ * anonymous barcodes. Fail closed when no strong secret is configured.
+ */
+function resolveDefaultSecret(): string {
+  const configured = process.env.ERP_CRYPTO_SECRET;
+  if (configured && configured.length >= 16) {
+    return configured;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'ERP_CRYPTO_SECRET must be set to a strong value (>= 16 characters) in production.'
+    );
+  }
+  return DEV_FALLBACK_SECRET;
+}
 
 // Global Institutional Ed25519 Keypair (cached in-memory or loaded from env)
 let cachedKeyPair: { publicKey: string; privateKey: string } | null = null;
@@ -25,7 +45,7 @@ export function getInstitutionalKeyPair(): { publicKey: string; privateKey: stri
 /**
  * Generate HMAC-SHA256 hex digest
  */
-export function hmacSha256(payload: string, secret: string = DEFAULT_SECRET): string {
+export function hmacSha256(payload: string, secret: string = resolveDefaultSecret()): string {
   return crypto.createHmac('sha256', secret).update(payload).digest('hex');
 }
 
@@ -63,7 +83,7 @@ export function generateQueueToken(
   studentId: string,
   queuePosition: number,
   validitySeconds: number = 600,
-  secret: string = DEFAULT_SECRET
+  secret: string = resolveDefaultSecret()
 ): { token: string; payload: QueueTokenPayload } {
   const now = Date.now();
   const payload: QueueTokenPayload = {
@@ -80,7 +100,7 @@ export function generateQueueToken(
 
 export function verifyQueueToken(
   token: string,
-  secret: string = DEFAULT_SECRET
+  secret: string = resolveDefaultSecret()
 ): { valid: boolean; payload?: QueueTokenPayload; error?: string } {
   try {
     const parts = token.split('.');
@@ -186,7 +206,7 @@ export function verifyRollingAttendanceToken(
 export function generateAnonymousBarcode(
   studentId: string,
   assessmentId: string,
-  salt: string = DEFAULT_SECRET
+  salt: string = resolveDefaultSecret()
 ): string {
   const hash = hmacSha256(`${studentId}:${assessmentId}`, salt);
   return `OSV-${hash.substring(0, 16).toUpperCase()}`;

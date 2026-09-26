@@ -17,7 +17,15 @@ export class DoubleBlindEngine {
   private secret: string;
 
   constructor(secret?: string) {
-    this.secret = secret || process.env.OSV_SECRET || 'double-blind-osv-secret-salt-2026';
+    const configured = secret || process.env.OSV_SECRET;
+    if (configured) {
+      this.secret = configured;
+    } else if (process.env.NODE_ENV === 'production') {
+      // A published salt would let anyone predict the identity barcodes.
+      throw new Error('OSV_SECRET must be set in production.');
+    } else {
+      this.secret = 'double-blind-osv-secret-salt-2026';
+    }
   }
 
   /**

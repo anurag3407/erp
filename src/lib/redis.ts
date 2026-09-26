@@ -508,6 +508,16 @@ export function createRedisClient(): ErpRedisClient {
     return new UpstashRedisClient({ url, token });
   }
 
+  if (process.env.NODE_ENV === 'production') {
+    // Distributed locks, webhook idempotency and the waiting-room limiter all
+    // depend on a shared Redis. Silently degrading to per-process memory in
+    // production would let duplicate webhooks double-credit accounts and break
+    // cross-instance seat/lock guarantees, so fail closed instead.
+    throw new Error(
+      'UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must be configured in production.'
+    );
+  }
+
   return new InMemoryRedisClient();
 }
 

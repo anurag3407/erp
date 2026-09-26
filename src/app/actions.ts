@@ -25,6 +25,30 @@ import {
   libraryActionSchema,
   whatIfSimulationSchema,
 } from "../lib/validations";
+import { ZodError } from "zod";
+
+/**
+ * Convert a thrown error into a client-safe message.
+ *
+ * Zod validation messages and domain errors (authored with an UPPER_SNAKE code
+ * prefix, e.g. "GRADEBOOK_LOCKED: ...") are safe to surface. Anything else —
+ * notably raw PostgreSQL errors that leak table/column names — is logged
+ * server-side and replaced with a generic message so internals are not
+ * disclosed to callers.
+ */
+function toClientError(err: unknown, fallback: string): string {
+  if (err instanceof ZodError) {
+    return err.issues
+      .map((i) => `${i.path.join(".") || "input"}: ${i.message}`)
+      .join("; ");
+  }
+  const message = err instanceof Error ? err.message : "";
+  if (/^[A-Z][A-Z0-9_]{2,}:/.test(message)) {
+    return message;
+  }
+  console.error("[server-action]", err);
+  return fallback;
+}
 
 export interface ServerActionResponse<T = any> {
   success: boolean;
@@ -74,7 +98,7 @@ export async function getDashboardData(role: string = "Student"): Promise<Server
       },
     };
   } catch (err: any) {
-    return { success: false, error: err.message || "Failed to load dashboard" };
+    return { success: false, error: toClientError(err, "Failed to load dashboard") };
   }
 }
 
@@ -100,7 +124,7 @@ export async function getCourseCatalog(): Promise<ServerActionResponse> {
     }));
     return { success: true, data: offerings };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
@@ -110,7 +134,7 @@ export async function enrollInCourse(offeringId: string, studentId: string = "us
     const result = await courseCheckoutService.checkoutCourses(valid.studentId, [valid.offeringId]);
     return { success: true, data: result };
   } catch (err: any) {
-    return { success: false, error: err.message || "Enrollment failed" };
+    return { success: false, error: toClientError(err, "Enrollment failed") };
   }
 }
 
@@ -142,7 +166,7 @@ export async function markAttendancePunch(payload?: {
     const res = await attendanceService.markAttendance(valid);
     return { success: res.success, data: res, error: res.error };
   } catch (err: any) {
-    return { success: false, error: err.message || "Attendance failed" };
+    return { success: false, error: toClientError(err, "Attendance failed") };
   }
 }
 
@@ -173,7 +197,7 @@ export async function getTimetableMatrix(): Promise<ServerActionResponse> {
     }));
     return { success: true, data: slots };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
@@ -205,7 +229,7 @@ export async function getDegreeAudit(studentId: string = "usr-stu-01"): Promise<
       },
     };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
@@ -228,7 +252,7 @@ export async function simulateWhatIf(targetProgramId: string, studentId: string 
     );
     return { success: true, data: sim };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
@@ -249,7 +273,7 @@ export async function getFeeTransactions(studentId: string = "usr-stu-01"): Prom
       }));
     return { success: true, data: txs };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
@@ -265,7 +289,7 @@ export async function payFeeTransaction(transactionId: string, studentId: string
     await db.paymentTransactions.set(tx.orderId, tx);
     return { success: true, data: { message: "Payment processed successfully via Razorpay UPI", transaction: tx } };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
@@ -284,7 +308,7 @@ export async function requestProvisionalPass(reason: string, studentId: string =
     });
     return { success: true, data: pass };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
@@ -303,7 +327,7 @@ export async function getLibraryBooks(): Promise<ServerActionResponse> {
     }));
     return { success: true, data: books };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
@@ -316,7 +340,7 @@ export async function borrowLibraryBook(bookId: string, borrowerId: string = "us
     const loan = await libraryService.issueBook(valid.bookId, targetStudentId);
     return { success: true, data: loan };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
@@ -336,7 +360,7 @@ export async function getLeaveApplications(userId: string = "usr-stu-01"): Promi
       }));
     return { success: true, data: leaves };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
@@ -381,7 +405,7 @@ export async function submitLeave(data: {
       return { success: true, data: res };
     }
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
@@ -413,7 +437,7 @@ export async function submitGrievance(data: {
     });
     return { success: true, data: res };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
@@ -423,7 +447,7 @@ export async function getNotifications(userId: string = "usr-stu-01"): Promise<S
     const notifs = await notificationCenter.getInbox(userId);
     return { success: true, data: notifs };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
@@ -432,6 +456,6 @@ export async function markNotificationAsRead(id: string, userId: string = "usr-s
     const notif = await notificationCenter.markAsRead(id, userId);
     return { success: true, data: notif };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    return { success: false, error: toClientError(err, "Request failed") };
   }
 }

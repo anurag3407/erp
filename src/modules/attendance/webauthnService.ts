@@ -7,6 +7,31 @@ import { db } from '../../lib/db.js';
  * Disallows multiple students using the same device hardware footprint.
  */
 
+/**
+ * Verify a WebAuthn assertion signature when the authenticator's public key is
+ * a parseable SPKI PEM. Returns false for demo/opaque keys so callers can
+ * decide how strict to be (production fails closed).
+ */
+function verifyAssertionSignature(
+  publicKeyPem: string,
+  clientDataJSON: string,
+  signatureBase64: string
+): boolean {
+  if (!publicKeyPem || !signatureBase64 || !publicKeyPem.includes('BEGIN PUBLIC KEY')) {
+    return false;
+  }
+  try {
+    return crypto.verify(
+      null,
+      Buffer.from(clientDataJSON, 'utf8'),
+      publicKeyPem,
+      Buffer.from(signatureBase64, 'base64')
+    );
+  } catch {
+    return false;
+  }
+}
+
 export interface RegisteredAuthenticator {
   id: string;
   studentId: string;
@@ -79,20 +104,50 @@ export class WebAuthnBindingService {
       };
     }
 
-    // Verify cryptographic signature with stored public key
+    // 1. Structural validation of the signed client data (challenge/origin).
+    let clientData: { challenge?: string; origin?: string };
     try {
-      // In production WebAuthn, verify using crypto.verify with credentialPublicKey
-      // Here we validate the signature exists and clientDataJSON contains the expected challenge
-      if (!signature || signature.length < 16) {
-        return { verified: false, error: 'INVALID_SIGNATURE: Malformed biometric signature' };
-      }
-
-      authenticator.counter += 1;
-      await db.authenticators.set(credentialId, authenticator);
-      return { verified: true };
+      clientData = JSON.parse(clientDataJSON);
     } catch {
-      return { verified: false, error: 'SIGNATURE_VERIFICATION_FAILED' };
+      return { verified: false, error: 'INVALID_CLIENT_DATA: clientDataJSON is not valid JSON' };
     }
+    if (!clientData.challenge) {
+      return { verified: false, error: 'INVALID_CLIENT_DATA: missing challenge in clientDataJSON' };
+    }
+    const expectedOrigin = process.env.WEBAUTHN_ORIGIN;
+    if (expectedOrigin && clientData.origin !== expectedOrigin) {
+      return {
+        verified: false,
+        error: 'INVALID_ORIGIN: clientDataJSON origin does not match this deployment',
+      };
+    }
+
+    // 2. Cryptographic signature verification against the stored public key.
+    const signatureOk = verifyAssertionSignature(
+      authenticator.credentialPublicKey,
+      clientDataJSON,
+      signature
+    );
+
+    if (!signatureOk && process.env.NODE_ENV === 'production') {
+      // Non-PEM/demo keys cannot be cryptographically verified. Never accept an
+      // unverifiable assertion in production unless explicitly opted out.
+      if (process.env.WEBAUTHN_ALLOW_UNVERIFIED_SIGNATURES !== 'true') {
+        return {
+          verified: false,
+          error: 'SIGNATURE_VERIFICATION_FAILED: authenticator public key is not verifiable',
+        };
+      }
+    }
+
+    // Development / opted-out fallback: at minimum require a plausible signature.
+    if (!signatureOk && (!signature || signature.length < 16)) {
+      return { verified: false, error: 'INVALID_SIGNATURE: Malformed biometric signature' };
+    }
+
+    authenticator.counter += 1;
+    await db.authenticators.set(credentialId, authenticator);
+    return { verified: true };
   }
 
   /**

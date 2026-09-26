@@ -1,5 +1,9 @@
 import crypto from 'node:crypto';
-import { signVerifiableDocument, verifyVerifiableDocument } from '../../lib/crypto.js';
+import {
+  signVerifiableDocument,
+  verifyVerifiableDocument,
+  getInstitutionalKeyPair,
+} from '../../lib/crypto.js';
 
 /**
  * Module 9: LTI 1.3 Advantage Protocol Engine
@@ -36,17 +40,76 @@ export class LtiAdvantageService {
    */
   validateLaunchMessage(jwtToken: string): { valid: boolean; payload?: LtiResourceLinkLaunchPayload; error?: string } {
     try {
-      // In LTI 1.3, token is signed by LMS platform RSA/Ed25519 key
+      // In LTI 1.3 the launch JWT is signed by the LMS platform key. We must
+      // reject unsigned tokens and validate the signature + registered claims.
       const parts = jwtToken.split('.');
       if (parts.length !== 3) {
         return { valid: false, error: 'Malformed LTI JWT structure' };
       }
+      const [headerB64, payloadB64, signatureB64] = parts;
 
-      const payloadJson = Buffer.from(parts[1], 'base64url').toString('utf8');
-      const payload = JSON.parse(payloadJson) as LtiResourceLinkLaunchPayload;
+      const header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8')) as {
+        alg?: string;
+      };
+      if (!header.alg || header.alg.toLowerCase() === 'none') {
+        return { valid: false, error: 'UNSIGNED_LTI_TOKEN: alg=none is not permitted' };
+      }
+
+      const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as
+        LtiResourceLinkLaunchPayload & { aud?: string | string[]; exp?: number; iat?: number };
 
       if (!payload.sub || !payload.courseOfferingId) {
         return { valid: false, error: 'Missing mandatory LTI claims (sub or courseOfferingId)' };
+      }
+
+      const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+      if (!aud.includes(this.platformClientId)) {
+        return {
+          valid: false,
+          error: 'INVALID_AUDIENCE: aud claim does not match the registered LTI client id',
+        };
+      }
+      if (payload.iss !== this.platformIssuer) {
+        return {
+          valid: false,
+          error: 'INVALID_ISSUER: iss claim does not match the registered LTI platform',
+        };
+      }
+      if (typeof payload.exp === 'number' && Date.now() >= payload.exp * 1000) {
+        return { valid: false, error: 'EXPIRED_LTI_TOKEN: token has expired' };
+      }
+      if (typeof payload.iat === 'number' && payload.iat * 1000 > Date.now() + 60_000) {
+        return { valid: false, error: 'INVALID_LTI_TOKEN: iat claim is in the future' };
+      }
+
+      // Verify the signature. Real deployments provide the platform key via
+      // LTI_PLATFORM_PUBLIC_KEY (standard JWT signing input); otherwise fall
+      // back to the institutional Ed25519 key used by the mock launch flow.
+      const signedInput = `${headerB64}.${payloadB64}`;
+      const platformKey = process.env.LTI_PLATFORM_PUBLIC_KEY;
+      let signatureOk: boolean;
+      if (platformKey) {
+        const algorithm = header.alg === 'RS256' ? 'sha256' : null;
+        try {
+          signatureOk = crypto.verify(
+            algorithm,
+            Buffer.from(signedInput, 'utf8'),
+            platformKey,
+            Buffer.from(signatureB64, 'base64url')
+          );
+        } catch {
+          signatureOk = false;
+        }
+      } else {
+        signatureOk = verifyVerifiableDocument(
+          { header: headerB64, body: payloadB64 },
+          signatureB64,
+          getInstitutionalKeyPair().publicKey
+        );
+      }
+
+      if (!signatureOk) {
+        return { valid: false, error: 'INVALID_LTI_SIGNATURE: token signature could not be verified' };
       }
 
       return { valid: true, payload };
