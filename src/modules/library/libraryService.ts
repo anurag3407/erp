@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { db } from '../../lib/db.js';
+import { db, withTransaction } from '../../lib/db.js';
 import { provisionalHallTicketService } from '../finance/provisionalHallTicket.js';
 import type {
   LibraryBook,
@@ -49,58 +49,62 @@ export class LibraryService {
    * Issue a book to a student
    */
   async issueBook(bookId: string, studentId: string, loanDays: number = this.standardLoanPeriodDays): Promise<BookLoan> {
-    const book = await db.libraryBooks.get(bookId);
-    if (!book) {
-      throw new Error(`Book not found: ${bookId}`);
-    }
+    // Decrementing stock and creating the loan must be atomic, otherwise a
+    // failure could hand out a copy that was never recorded as issued.
+    return withTransaction(async (tx) => {
+      const book = await tx.libraryBooks.get(bookId);
+      if (!book) {
+        throw new Error(`Book not found: ${bookId}`);
+      }
 
-    if (book.availableCopies <= 0) {
-      throw new Error(`OUT_OF_STOCK: No copies available for book ${book.title}`);
-    }
+      if (book.availableCopies <= 0) {
+        throw new Error(`OUT_OF_STOCK: No copies available for book ${book.title}`);
+      }
 
-    const student = await db.studentProfiles.get(studentId);
-    if (!student) {
-      throw new Error(`Student not found: ${studentId}`);
-    }
+      const student = await tx.studentProfiles.get(studentId);
+      if (!student) {
+        throw new Error(`Student not found: ${studentId}`);
+      }
 
-    const now = new Date();
+      const now = new Date();
 
-    // Prevent duplicate borrowing of the same book
-    const activeLoans = await db.bookLoans.values();
-    const existingActiveLoan = activeLoans.find(
-      (l) => l.bookId === bookId && l.studentId === studentId && l.status === 'ISSUED'
-    );
-    if (existingActiveLoan) {
-      throw new Error(`DUPLICATE_LOAN_DISALLOWED: Student ${studentId} already has an active copy of book ${book.title}`);
-    }
+      // Prevent duplicate borrowing of the same book
+      const activeLoans = await tx.bookLoans.values();
+      const existingActiveLoan = activeLoans.find(
+        (l) => l.bookId === bookId && l.studentId === studentId && l.status === 'ISSUED'
+      );
+      if (existingActiveLoan) {
+        throw new Error(`DUPLICATE_LOAN_DISALLOWED: Student ${studentId} already has an active copy of book ${book.title}`);
+      }
 
-    // Check if student is blocked due to overdue unreturned books
-    const overdueCount = activeLoans.filter(
-      (l) => l.studentId === studentId && l.status === 'ISSUED' && now.getTime() > new Date(l.dueDate).getTime()
-    ).length;
-    if (overdueCount > 0) {
-      throw new Error(`BORROWING_BLOCKED: Student ${studentId} has ${overdueCount} overdue book(s). Return them before borrowing new books.`);
-    }
+      // Check if student is blocked due to overdue unreturned books
+      const overdueCount = activeLoans.filter(
+        (l) => l.studentId === studentId && l.status === 'ISSUED' && now.getTime() > new Date(l.dueDate).getTime()
+      ).length;
+      if (overdueCount > 0) {
+        throw new Error(`BORROWING_BLOCKED: Student ${studentId} has ${overdueCount} overdue book(s). Return them before borrowing new books.`);
+      }
 
-    const dueDate = new Date(now.getTime() + loanDays * 86400000);
+      const dueDate = new Date(now.getTime() + loanDays * 86400000);
 
-    const loanId = `loan-${crypto.randomUUID()}`;
-    const loan: BookLoan = {
-      id: loanId,
-      bookId,
-      studentId,
-      issuedAt: now,
-      dueDate,
-      renewalCount: 0,
-      status: 'ISSUED',
-      overdueFineAmount: 0,
-    };
+      const loanId = `loan-${crypto.randomUUID()}`;
+      const loan: BookLoan = {
+        id: loanId,
+        bookId,
+        studentId,
+        issuedAt: now,
+        dueDate,
+        renewalCount: 0,
+        status: 'ISSUED',
+        overdueFineAmount: 0,
+      };
 
-    book.availableCopies -= 1;
-    await db.libraryBooks.set(book.id, book);
-    await db.bookLoans.set(loanId, loan);
+      book.availableCopies -= 1;
+      await tx.libraryBooks.set(book.id, book);
+      await tx.bookLoans.set(loanId, loan);
 
-    return loan;
+      return loan;
+    });
   }
 
   /**
@@ -136,59 +140,64 @@ export class LibraryService {
    * Return a book, calculate overdue fine, and connect to payment_transactions under feeHead 'LIBRARY_FINE'
    */
   async returnBook(loanId: string, returnDate: Date = new Date()): Promise<{ loan: BookLoan; fineTransaction?: PaymentTransaction }> {
-    const loan = await db.bookLoans.get(loanId);
-    if (!loan) {
-      throw new Error(`Loan record not found: ${loanId}`);
-    }
-
-    if (loan.status === 'RETURNED') {
-      throw new Error(`Book is already returned: ${loanId}`);
-    }
-
-    const book = await db.libraryBooks.get(loan.bookId);
-    if (book) {
-      book.availableCopies = Math.min(book.totalCopies, book.availableCopies + 1);
-      await db.libraryBooks.set(book.id, book);
-    }
-
-    loan.returnedAt = returnDate;
-    loan.status = 'RETURNED';
-
-    let fineTransaction: PaymentTransaction | undefined;
-
-    // Check overdue
-    if (returnDate.getTime() > new Date(loan.dueDate).getTime()) {
-      const daysOverdue = Math.ceil((returnDate.getTime() - new Date(loan.dueDate).getTime()) / 86400000);
-      const fineAmount = Math.round(daysOverdue * this.finePerDayRupees * 100) / 100;
-      loan.overdueFineAmount = fineAmount;
-
-      if (fineAmount > 0) {
-        // Connect to payment_transactions under feeHead 'LIBRARY_FINE'
-        const txId = `tx-lib-${crypto.randomUUID()}`;
-        const orderId = `order_lib_${crypto.randomUUID().substring(0, 16)}`;
-
-        fineTransaction = {
-          id: txId,
-          studentId: loan.studentId,
-          feeStructureId: 'fee-struct-lib-fine',
-          feeHead: 'LIBRARY_FINE',
-          amount: fineAmount,
-          gateway: 'RAZORPAY',
-          orderId,
-          idempotencyKey: `idem-lib-${loanId}`,
-          status: 'PENDING',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
-
-        await db.paymentTransactions.set(orderId, fineTransaction);
-        loan.fineTransactionId = fineTransaction.id;
+    // Restoring the copy, closing the loan, and raising the fine must commit
+    // atomically — otherwise a failure could return a copy that never freed
+    // up, or attach a fine to a loan still marked ISSUED.
+    return withTransaction(async (tx) => {
+      const loan = await tx.bookLoans.get(loanId);
+      if (!loan) {
+        throw new Error(`Loan record not found: ${loanId}`);
       }
-    }
 
-    await db.bookLoans.set(loan.id, loan);
+      if (loan.status === 'RETURNED') {
+        throw new Error(`Book is already returned: ${loanId}`);
+      }
 
-    return { loan, fineTransaction };
+      const book = await tx.libraryBooks.get(loan.bookId);
+      if (book) {
+        book.availableCopies = Math.min(book.totalCopies, book.availableCopies + 1);
+        await tx.libraryBooks.set(book.id, book);
+      }
+
+      loan.returnedAt = returnDate;
+      loan.status = 'RETURNED';
+
+      let fineTransaction: PaymentTransaction | undefined;
+
+      // Check overdue
+      if (returnDate.getTime() > new Date(loan.dueDate).getTime()) {
+        const daysOverdue = Math.ceil((returnDate.getTime() - new Date(loan.dueDate).getTime()) / 86400000);
+        const fineAmount = Math.round(daysOverdue * this.finePerDayRupees * 100) / 100;
+        loan.overdueFineAmount = fineAmount;
+
+        if (fineAmount > 0) {
+          // Connect to payment_transactions under feeHead 'LIBRARY_FINE'
+          const txId = `tx-lib-${crypto.randomUUID()}`;
+          const orderId = `order_lib_${crypto.randomUUID().substring(0, 16)}`;
+
+          fineTransaction = {
+            id: txId,
+            studentId: loan.studentId,
+            feeStructureId: 'fee-struct-lib-fine',
+            feeHead: 'LIBRARY_FINE',
+            amount: fineAmount,
+            gateway: 'RAZORPAY',
+            orderId,
+            idempotencyKey: `idem-lib-${loanId}`,
+            status: 'PENDING',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+
+          await tx.paymentTransactions.set(orderId, fineTransaction);
+          loan.fineTransactionId = fineTransaction.id;
+        }
+      }
+
+      await tx.bookLoans.set(loan.id, loan);
+
+      return { loan, fineTransaction };
+    });
   }
 
   /**

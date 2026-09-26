@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { db } from '../../lib/db.js';
+import { db, withTransaction } from '../../lib/db.js';
 import { seatEngine } from './seatEngine.js';
 
 /**
@@ -22,44 +22,48 @@ export class WaitlistService {
    * Add student to waitlist
    */
   async addToWaitlist(studentId: string, offeringId: string): Promise<WaitlistEntry> {
-    const existingEntries = (await db.waitlists.values()).filter(
-      (w) => w.offeringId === offeringId
-    );
-    const existing = existingEntries.find((w) => w.studentId === studentId);
-    if (existing) {
-      return {
-        id: existing.id,
-        studentId: existing.studentId,
-        offeringId: existing.offeringId,
-        position: existing.position,
-        reservedUntil: existing.reservedUntil,
-        status: existing.reservedUntil && new Date() < existing.reservedUntil ? 'OFFERED_RESERVATION' : 'QUEUED',
+    // The waitlist row and the offering's cached waitlist_count must move
+    // together, or the offering count drifts from the actual queue.
+    return withTransaction(async (tx) => {
+      const existingEntries = (await tx.waitlists.values()).filter(
+        (w) => w.offeringId === offeringId
+      );
+      const existing = existingEntries.find((w) => w.studentId === studentId);
+      if (existing) {
+        return {
+          id: existing.id,
+          studentId: existing.studentId,
+          offeringId: existing.offeringId,
+          position: existing.position,
+          reservedUntil: existing.reservedUntil,
+          status: existing.reservedUntil && new Date() < existing.reservedUntil ? 'OFFERED_RESERVATION' : 'QUEUED',
+        };
+      }
+
+      const position = existingEntries.length + 1;
+      const id = `wl-${crypto.randomUUID()}`;
+      const entry = {
+        id,
+        studentId,
+        offeringId,
+        position,
       };
-    }
+      await tx.waitlists.set(id, entry);
 
-    const position = existingEntries.length + 1;
-    const id = `wl-${crypto.randomUUID()}`;
-    const entry = {
-      id,
-      studentId,
-      offeringId,
-      position,
-    };
-    await db.waitlists.set(id, entry);
+      const offering = await tx.courseOfferings.get(offeringId);
+      if (offering) {
+        offering.waitlistCount = position;
+        await tx.courseOfferings.set(offering.id, offering);
+      }
 
-    const offering = await db.courseOfferings.get(offeringId);
-    if (offering) {
-      offering.waitlistCount = position;
-      await db.courseOfferings.set(offering.id, offering);
-    }
-
-    return {
-      id,
-      studentId,
-      offeringId,
-      position,
-      status: 'QUEUED',
-    };
+      return {
+        id,
+        studentId,
+        offeringId,
+        position,
+        status: 'QUEUED',
+      };
+    });
   }
 
   /**

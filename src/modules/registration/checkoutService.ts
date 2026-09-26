@@ -1,6 +1,5 @@
 import crypto from 'node:crypto';
-import { db } from '../../lib/db.js';
-import { sql } from '../../db/client.js';
+import { db, withTransaction } from '../../lib/db.js';
 import { seatEngine } from './seatEngine.js';
 
 /**
@@ -71,29 +70,35 @@ export class CourseCheckoutService {
           continue;
         }
 
-        // Atomic check-and-increment at the database level:
-        // UPDATE course_offerings SET enrolled_count = enrolled_count + 1
-        // WHERE id = $1 AND enrolled_count < max_capacity
-        const updated = await sql<{ enrolled_count: number }[]>`
-          update course_offerings
-             set enrolled_count = enrolled_count + 1
-           where id = ${offeringId} and enrolled_count < max_capacity
-           returning enrolled_count
-        `;
-        if (updated.length === 0) {
+        // Atomic check-and-increment at the database level plus the enrollment
+        // insert happen in ONE transaction, so we never increment a seat
+        // without recording the enrollment (or vice versa).
+        const enrollmentId = `enr-${crypto.randomUUID()}`;
+        const committed = await withTransaction(async (tx, exec) => {
+          const updated = await exec.unsafe<{ enrolled_count: number }[]>(
+            `update course_offerings
+                set enrolled_count = enrolled_count + 1
+              where id = $1 and enrolled_count < max_capacity
+              returning enrolled_count`,
+            [offeringId]
+          );
+          if (updated.length === 0) return false;
+
+          await tx.enrollments.set(enrollmentId, {
+            id: enrollmentId,
+            studentId,
+            offeringId,
+            status: 'CONFIRMED',
+            enrolledAt: new Date(),
+          });
+          return true;
+        });
+
+        if (!committed) {
           await seatEngine.releaseReservation(offeringId, studentId);
           failed.push({ offeringId, reason: 'Capacity exceeded at database commit' });
           continue;
         }
-
-        const enrollmentId = `enr-${crypto.randomUUID()}`;
-        await db.enrollments.set(enrollmentId, {
-          id: enrollmentId,
-          studentId,
-          offeringId,
-          status: 'CONFIRMED',
-          enrolledAt: new Date(),
-        });
 
         // Commit the reservation now that it's permanently recorded in the database
         await seatEngine.commitReservation(offeringId, studentId);

@@ -13,6 +13,15 @@ import { resetDatabase } from './seed.js';
 
 type Row = Record<string, any>;
 
+/**
+ * Minimal query executor shared by the root postgres.js client and a
+ * transaction (`sql.begin` -> `tx`). Both expose the same `unsafe` interface,
+ * so a store can be re-bound to a transaction without any query rewriting.
+ */
+export interface Executor {
+  unsafe<T extends any[] = Row[]>(query: string, parameters?: any[]): Promise<T>;
+}
+
 const camel = (s: string): string => s.replace(/_([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
 const ident = (s: string): string => `"${s.replace(/"/g, '""')}"`;
 const fmtDate = (d: Date): string => d.toISOString().slice(0, 10);
@@ -36,7 +45,16 @@ interface StoreConfig<T> {
 }
 
 export class SqlStore<T extends object> {
-  constructor(private cfg: StoreConfig<T>) {}
+  constructor(private cfg: StoreConfig<T>, private exec: Executor = sql) {}
+
+  /**
+   * Return an equivalent store whose queries run on the given executor — e.g.
+   * the transaction handle inside `sql.begin` — so reads and writes share one
+   * PostgreSQL transaction.
+   */
+  bind(exec: Executor): SqlStore<T> {
+    return new SqlStore<T>(this.cfg, exec);
+  }
 
   private split(key: string): string[] {
     if (this.cfg.splitKey) return this.cfg.splitKey(key);
@@ -87,7 +105,7 @@ export class SqlStore<T extends object> {
 
   async get(key: string): Promise<T | undefined> {
     const { clause, values } = this.whereClause(key);
-    const rows = await sql.unsafe<Row[]>(
+    const rows = await this.exec.unsafe<Row[]>(
       `select * from ${ident(this.cfg.table)} where ${clause} limit 1`,
       values
     );
@@ -99,7 +117,7 @@ export class SqlStore<T extends object> {
   }
 
   async values(): Promise<T[]> {
-    const rows = await sql.unsafe<Row[]>(`select * from ${ident(this.cfg.table)}`);
+    const rows = await this.exec.unsafe<Row[]>(`select * from ${ident(this.cfg.table)}`);
     return rows.map((r) => this.toDomain(r));
   }
 
@@ -130,17 +148,20 @@ export class SqlStore<T extends object> {
     } else {
       query += ` on conflict do nothing`;
     }
-    await sql.unsafe(query, values);
+    await this.exec.unsafe(query, values);
   }
 
   async delete(key: string): Promise<boolean> {
     const { clause, values } = this.whereClause(key);
-    const res = await sql.unsafe(`delete from ${ident(this.cfg.table)} where ${clause}`, values);
+    const res = await this.exec.unsafe<Row[] & { count: number }>(
+      `delete from ${ident(this.cfg.table)} where ${clause}`,
+      values
+    );
     return res.count > 0;
   }
 
   async count(): Promise<number> {
-    const rows = await sql.unsafe<{ n: number }[]>(
+    const rows = await this.exec.unsafe<{ n: number }[]>(
       `select count(*)::int as n from ${ident(this.cfg.table)}`
     );
     return rows[0]?.n ?? 0;
@@ -399,3 +420,25 @@ export const db = {
 };
 
 export type ErpRepositories = typeof db;
+
+/**
+ * Run a multi-step mutation inside a single PostgreSQL transaction.
+ *
+ * Every store passed to the callback is bound to the transaction handle, so
+ * reads and writes participate in the same atomic unit. Returning normally
+ * commits; throwing rolls the whole thing back. The raw executor is passed as
+ * the second argument for queries the stores don't model (e.g. conditional
+ * `UPDATE ... WHERE ... RETURNING`).
+ */
+export async function withTransaction<T>(
+  fn: (tx: ErpRepositories, exec: Executor) => Promise<T>
+): Promise<T> {
+  return sql.begin(async (txSql) => {
+    const bound = {} as ErpRepositories;
+    for (const [key, value] of Object.entries(db)) {
+      (bound as any)[key] =
+        value instanceof SqlStore ? value.bind(txSql as unknown as Executor) : value;
+    }
+    return fn(bound, txSql as unknown as Executor);
+  }) as Promise<T>;
+}

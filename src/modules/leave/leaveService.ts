@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { db } from '../../lib/db.js';
+import { db, withTransaction } from '../../lib/db.js';
 import { validateTemporalExclusion } from '../timetable/temporalExclusion.js';
 import type {
   LeaveApplication,
@@ -213,43 +213,47 @@ export class LeaveService {
    * If leave is On-Duty (OD), automatically generates On-Duty Pass
    */
   async approveByHod(leaveId: string, hodUserId: string): Promise<{ application: LeaveApplication; onDutyPass?: OnDutyPass }> {
-    const app = await db.leaveApplications.get(leaveId);
-    if (!app) {
-      throw new Error(`Leave application not found: ${leaveId}`);
-    }
+    // The approval and (for On-Duty leaves) the generated pass must land
+    // together — a pass without an approved leave, or vice versa, is invalid.
+    return withTransaction(async (tx) => {
+      const app = await tx.leaveApplications.get(leaveId);
+      if (!app) {
+        throw new Error(`Leave application not found: ${leaveId}`);
+      }
 
-    if (app.status !== 'PENDING_HOD') {
-      throw new Error(`Leave application is not awaiting HOD approval (current: ${app.status})`);
-    }
+      if (app.status !== 'PENDING_HOD') {
+        throw new Error(`Leave application is not awaiting HOD approval (current: ${app.status})`);
+      }
 
-    app.hodApprovalId = hodUserId;
-    app.hodApprovedAt = new Date();
-    app.status = 'APPROVED';
-    app.updatedAt = new Date();
+      app.hodApprovalId = hodUserId;
+      app.hodApprovedAt = new Date();
+      app.status = 'APPROVED';
+      app.updatedAt = new Date();
 
-    let onDutyPass: OnDutyPass | undefined;
+      let onDutyPass: OnDutyPass | undefined;
 
-    if (app.isOnDuty && app.applicantType === 'STUDENT') {
-      const passNumber = `OD-${new Date().getFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-      app.onDutyPassNumber = passNumber;
+      if (app.isOnDuty && app.applicantType === 'STUDENT') {
+        const passNumber = `OD-${new Date().getFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+        app.onDutyPassNumber = passNumber;
 
-      onDutyPass = {
-        id: `od-pass-${crypto.randomUUID()}`,
-        leaveApplicationId: app.id,
-        studentId: app.applicantId,
-        eventName: app.onDutyEventName || 'Official Academic / Sports Representation',
-        startDate: app.startDate,
-        endDate: app.endDate,
-        passNumber,
-        isVerified: true,
-        issuedAt: new Date(),
-      };
+        onDutyPass = {
+          id: `od-pass-${crypto.randomUUID()}`,
+          leaveApplicationId: app.id,
+          studentId: app.applicantId,
+          eventName: app.onDutyEventName || 'Official Academic / Sports Representation',
+          startDate: app.startDate,
+          endDate: app.endDate,
+          passNumber,
+          isVerified: true,
+          issuedAt: new Date(),
+        };
 
-      await db.onDutyPasses.set(passNumber, onDutyPass);
-    }
+        await tx.onDutyPasses.set(passNumber, onDutyPass);
+      }
 
-    await db.leaveApplications.set(app.id, app);
-    return { application: app, onDutyPass };
+      await tx.leaveApplications.set(app.id, app);
+      return { application: app, onDutyPass };
+    });
   }
 
   /**
@@ -278,35 +282,39 @@ export class LeaveService {
     cancelledByUserId: string,
     reason?: string
   ): Promise<{ application: LeaveApplication; revokedOnDutyPass?: OnDutyPass }> {
-    const app = await db.leaveApplications.get(leaveId);
-    if (!app) {
-      throw new Error(`Leave application not found: ${leaveId}`);
-    }
-
-    if (app.status === 'CANCELLED') {
-      throw new Error(`Leave application ${leaveId} is already cancelled`);
-    }
-
-    if (app.status === 'REJECTED') {
-      throw new Error(`Cannot cancel an already rejected leave application: ${leaveId}`);
-    }
-
-    app.status = 'CANCELLED';
-    app.rejectionReason = reason || `Cancelled by user ${cancelledByUserId}`;
-    app.updatedAt = new Date();
-
-    let revokedPass: OnDutyPass | undefined;
-    if (app.onDutyPassNumber) {
-      const pass = await db.onDutyPasses.get(app.onDutyPassNumber);
-      if (pass) {
-        pass.isVerified = false;
-        await db.onDutyPasses.set(pass.passNumber, pass);
-        revokedPass = pass;
+    // Cancelling the leave and revoking its On-Duty pass must be atomic — a
+    // cancelled leave with a still-valid pass (or vice versa) is invalid.
+    return withTransaction(async (tx) => {
+      const app = await tx.leaveApplications.get(leaveId);
+      if (!app) {
+        throw new Error(`Leave application not found: ${leaveId}`);
       }
-    }
 
-    await db.leaveApplications.set(app.id, app);
-    return { application: app, revokedOnDutyPass: revokedPass };
+      if (app.status === 'CANCELLED') {
+        throw new Error(`Leave application ${leaveId} is already cancelled`);
+      }
+
+      if (app.status === 'REJECTED') {
+        throw new Error(`Cannot cancel an already rejected leave application: ${leaveId}`);
+      }
+
+      app.status = 'CANCELLED';
+      app.rejectionReason = reason || `Cancelled by user ${cancelledByUserId}`;
+      app.updatedAt = new Date();
+
+      let revokedPass: OnDutyPass | undefined;
+      if (app.onDutyPassNumber) {
+        const pass = await tx.onDutyPasses.get(app.onDutyPassNumber);
+        if (pass) {
+          pass.isVerified = false;
+          await tx.onDutyPasses.set(pass.passNumber, pass);
+          revokedPass = pass;
+        }
+      }
+
+      await tx.leaveApplications.set(app.id, app);
+      return { application: app, revokedOnDutyPass: revokedPass };
+    });
   }
 
   /**

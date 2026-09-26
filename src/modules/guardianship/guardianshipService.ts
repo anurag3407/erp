@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { db } from '../../lib/db.js';
+import { db, withTransaction } from '../../lib/db.js';
 import type {
   StudentGuardian,
   GuardianRelationship,
@@ -45,44 +45,50 @@ export class GuardianshipService {
     }
 
     const key = `${req.studentId}:${req.guardianUserId}`;
-    const existing = await db.studentGuardians.get(key);
 
-    const permissions: GuardianPermissions = {
-      ...this.defaultPermissions,
-      ...(req.permissions || {}),
-    };
+    // Promoting a new primary contact demotes the old one(s) and upserts the
+    // link — these must commit together or a student can end up with zero or
+    // multiple primary contacts.
+    return withTransaction(async (tx) => {
+      const existing = await tx.studentGuardians.get(key);
 
-    if (req.isPrimaryContact) {
-      for (const g of await db.studentGuardians.values()) {
-        if (g.studentId === req.studentId && g.guardianUserId !== req.guardianUserId) {
-          g.isPrimaryContact = false;
-          await db.studentGuardians.set(`${g.studentId}:${g.guardianUserId}`, g);
+      const permissions: GuardianPermissions = {
+        ...this.defaultPermissions,
+        ...(req.permissions || {}),
+      };
+
+      if (req.isPrimaryContact) {
+        for (const g of await tx.studentGuardians.values()) {
+          if (g.studentId === req.studentId && g.guardianUserId !== req.guardianUserId) {
+            g.isPrimaryContact = false;
+            await tx.studentGuardians.set(`${g.studentId}:${g.guardianUserId}`, g);
+          }
         }
       }
-    }
 
-    if (existing) {
-      existing.relationship = req.relationship;
-      existing.isPrimaryContact = req.isPrimaryContact ?? existing.isPrimaryContact;
-      existing.permissions = permissions;
-      await db.studentGuardians.set(key, existing);
-      return existing;
-    }
+      if (existing) {
+        existing.relationship = req.relationship;
+        existing.isPrimaryContact = req.isPrimaryContact ?? existing.isPrimaryContact;
+        existing.permissions = permissions;
+        await tx.studentGuardians.set(key, existing);
+        return existing;
+      }
 
-    const linkId = `sg-${crypto.randomUUID()}`;
-    const link: StudentGuardian = {
-      id: linkId,
-      studentId: req.studentId,
-      guardianUserId: req.guardianUserId,
-      relationship: req.relationship,
-      isPrimaryContact: req.isPrimaryContact ?? false,
-      permissions,
-      verifiedAt: new Date(),
-      createdAt: new Date(),
-    };
+      const linkId = `sg-${crypto.randomUUID()}`;
+      const link: StudentGuardian = {
+        id: linkId,
+        studentId: req.studentId,
+        guardianUserId: req.guardianUserId,
+        relationship: req.relationship,
+        isPrimaryContact: req.isPrimaryContact ?? false,
+        permissions,
+        verifiedAt: new Date(),
+        createdAt: new Date(),
+      };
 
-    await db.studentGuardians.set(key, link);
-    return link;
+      await tx.studentGuardians.set(key, link);
+      return link;
+    });
   }
 
   /**

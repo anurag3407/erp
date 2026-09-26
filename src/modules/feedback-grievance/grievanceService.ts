@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { db } from '../../lib/db.js';
+import { db, withTransaction } from '../../lib/db.js';
 import type {
   GrievanceCategory,
   GrievanceSeverity,
@@ -42,6 +42,23 @@ export class GrievanceService {
     DISCIPLINARY: 'Standing Proctorial Disciplinary Board',
   };
 
+  /** Build an action-log row; the caller decides which executor persists it. */
+  private buildActionLog(
+    ticketId: string,
+    action: string,
+    performedByUserId: string,
+    notes?: string
+  ): GrievanceActionLog {
+    return {
+      id: `grv-act-${crypto.randomUUID()}`,
+      ticketId,
+      action,
+      performedByUserId,
+      notes,
+      timestamp: new Date(),
+    };
+  }
+
   /**
    * File a formal statutory grievance
    */
@@ -71,34 +88,28 @@ export class GrievanceService {
       updatedAt: now,
     };
 
-    await db.grievanceTickets.set(ticketId, ticket);
+    // The ticket and its opening audit-log entry are one atomic filing.
+    return withTransaction(async (tx) => {
+      await tx.grievanceTickets.set(ticketId, ticket);
 
-    // Initial action log
-    await this.logAction(
-      ticketId,
-      'GRIEVANCE_SUBMITTED',
-      req.complainantId || 'ANONYMOUS',
-      `Grievance submitted under category ${req.category} with ${slaHours}h SLA`
-    );
+      const log = this.buildActionLog(
+        ticketId,
+        'GRIEVANCE_SUBMITTED',
+        req.complainantId || 'ANONYMOUS',
+        `Grievance submitted under category ${req.category} with ${slaHours}h SLA`
+      );
+      await tx.grievanceActionLogs.set(log.id, log);
 
-    return ticket;
+      return ticket;
+    });
   }
 
   /**
    * Record a statutory committee action/hearing in the audit log
    */
   async logAction(ticketId: string, action: string, performedByUserId: string, notes?: string): Promise<GrievanceActionLog> {
-    const logId = `grv-act-${crypto.randomUUID()}`;
-    const log: GrievanceActionLog = {
-      id: logId,
-      ticketId,
-      action,
-      performedByUserId,
-      notes,
-      timestamp: new Date(),
-    };
-
-    await db.grievanceActionLogs.set(logId, log);
+    const log = this.buildActionLog(ticketId, action, performedByUserId, notes);
+    await db.grievanceActionLogs.set(log.id, log);
     return log;
   }
 
@@ -111,69 +122,78 @@ export class GrievanceService {
     performedByUserId: string,
     notes?: string
   ): Promise<GrievanceTicket> {
-    const ticket = await db.grievanceTickets.get(ticketId);
-    if (!ticket) {
-      throw new Error(`Grievance ticket not found: ${ticketId}`);
-    }
-
-    const now = new Date();
-    ticket.status = status;
-    ticket.updatedAt = now;
-    if (status === 'RESOLVED' || status === 'CLOSED') {
-      ticket.resolvedAt = ticket.resolvedAt || now;
-      ticket.isSlaBreached = now.getTime() > ticket.slaDeadline.getTime();
-      if (notes && !ticket.resolutionSummary) {
-        ticket.resolutionSummary = notes;
+    return withTransaction(async (tx) => {
+      const ticket = await tx.grievanceTickets.get(ticketId);
+      if (!ticket) {
+        throw new Error(`Grievance ticket not found: ${ticketId}`);
       }
-    }
 
-    if (notes) {
-      ticket.investigationNotes = ticket.investigationNotes
-        ? `${ticket.investigationNotes}\n[${now.toISOString()}] ${notes}`
-        : `[${now.toISOString()}] ${notes}`;
-    }
+      const now = new Date();
+      ticket.status = status;
+      ticket.updatedAt = now;
+      if (status === 'RESOLVED' || status === 'CLOSED') {
+        ticket.resolvedAt = ticket.resolvedAt || now;
+        ticket.isSlaBreached = now.getTime() > ticket.slaDeadline.getTime();
+        if (notes && !ticket.resolutionSummary) {
+          ticket.resolutionSummary = notes;
+        }
+      }
 
-    await this.logAction(ticketId, `STATUS_CHANGED_TO_${status}`, performedByUserId, notes);
-    await db.grievanceTickets.set(ticket.id, ticket);
-    return ticket;
+      if (notes) {
+        ticket.investigationNotes = ticket.investigationNotes
+          ? `${ticket.investigationNotes}\n[${now.toISOString()}] ${notes}`
+          : `[${now.toISOString()}] ${notes}`;
+      }
+
+      const log = this.buildActionLog(ticketId, `STATUS_CHANGED_TO_${status}`, performedByUserId, notes);
+      await tx.grievanceActionLogs.set(log.id, log);
+      await tx.grievanceTickets.set(ticket.id, ticket);
+      return ticket;
+    });
   }
 
   /**
    * Formal resolution of statutory grievance
    */
   async resolveGrievance(ticketId: string, resolvedByUserId: string, resolutionSummary: string): Promise<GrievanceTicket> {
-    const ticket = await db.grievanceTickets.get(ticketId);
-    if (!ticket) {
-      throw new Error(`Grievance ticket not found: ${ticketId}`);
-    }
+    return withTransaction(async (tx) => {
+      const ticket = await tx.grievanceTickets.get(ticketId);
+      if (!ticket) {
+        throw new Error(`Grievance ticket not found: ${ticketId}`);
+      }
 
-    const now = new Date();
-    ticket.status = 'RESOLVED';
-    ticket.resolutionSummary = resolutionSummary;
-    ticket.resolvedAt = now;
-    ticket.updatedAt = now;
-    ticket.isSlaBreached = now.getTime() > ticket.slaDeadline.getTime();
+      const now = new Date();
+      ticket.status = 'RESOLVED';
+      ticket.resolutionSummary = resolutionSummary;
+      ticket.resolvedAt = now;
+      ticket.updatedAt = now;
+      ticket.isSlaBreached = now.getTime() > ticket.slaDeadline.getTime();
 
-    await this.logAction(ticketId, 'GRIEVANCE_RESOLVED', resolvedByUserId, resolutionSummary);
-    await db.grievanceTickets.set(ticket.id, ticket);
-    return ticket;
+      const log = this.buildActionLog(ticketId, 'GRIEVANCE_RESOLVED', resolvedByUserId, resolutionSummary);
+      await tx.grievanceActionLogs.set(log.id, log);
+      await tx.grievanceTickets.set(ticket.id, ticket);
+      return ticket;
+    });
   }
 
   /**
    * Escalate grievance to Executive Dean / Ombudsman
    */
   async escalateGrievance(ticketId: string, escalatedByUserId: string, reason: string): Promise<GrievanceTicket> {
-    const ticket = await db.grievanceTickets.get(ticketId);
-    if (!ticket) {
-      throw new Error(`Grievance ticket not found: ${ticketId}`);
-    }
+    return withTransaction(async (tx) => {
+      const ticket = await tx.grievanceTickets.get(ticketId);
+      if (!ticket) {
+        throw new Error(`Grievance ticket not found: ${ticketId}`);
+      }
 
-    ticket.status = 'ESCALATED';
-    ticket.updatedAt = new Date();
+      ticket.status = 'ESCALATED';
+      ticket.updatedAt = new Date();
 
-    await this.logAction(ticketId, 'ESCALATED_TO_OMBUDSMAN', escalatedByUserId, reason);
-    await db.grievanceTickets.set(ticket.id, ticket);
-    return ticket;
+      const log = this.buildActionLog(ticketId, 'ESCALATED_TO_OMBUDSMAN', escalatedByUserId, reason);
+      await tx.grievanceActionLogs.set(log.id, log);
+      await tx.grievanceTickets.set(ticket.id, ticket);
+      return ticket;
+    });
   }
 
   /**

@@ -12,6 +12,7 @@ import {
   computePaymentIdempotencyKey,
   redis,
   db,
+  withTransaction,
   type OnScreenEvaluationScript,
   // Modules
   waitingRoomService,
@@ -390,5 +391,42 @@ export async function runUnitTests(): Promise<void> {
   assert.strictEqual(await seatEngine.getAvailableSeats(testOffId), 4, 'Seats must restore to 4 after release');
   console.log('  ✓ Seat Engine Cart Hold, Commit & Release Verified');
 
-  console.log('\n=== ALL UNIT TESTS PASSED (17/17) ===\n');
+  // 18. Postgres Transaction Atomicity & Rollback
+  console.log('Test 1.18: Transaction Atomicity & Rollback');
+  const txRollbackId = 'usr-tx-rollback';
+  const txCommitId = 'usr-tx-commit';
+  const txUser = (id: string, email: string): any => ({
+    id,
+    email,
+    name: 'Tx Test User',
+    role: 'STUDENT',
+    passwordHash: 'seeded',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  await assert.rejects(
+    withTransaction(async (tx) => {
+      await tx.users.set(txRollbackId, txUser(txRollbackId, 'tx-rollback@example.com'));
+      // Reads inside the transaction must observe its own uncommitted writes.
+      assert.ok(await tx.users.get(txRollbackId), 'Row must be visible inside its transaction');
+      throw new Error('tx-boom');
+    }),
+    /tx-boom/,
+    'Transaction must propagate the thrown error'
+  );
+  assert.strictEqual(
+    await db.users.get(txRollbackId),
+    undefined,
+    'Rolled-back row must not persist'
+  );
+
+  await withTransaction(async (tx) => {
+    await tx.users.set(txCommitId, txUser(txCommitId, 'tx-commit@example.com'));
+  });
+  assert.ok(await db.users.get(txCommitId), 'Committed row must persist');
+  await db.users.delete(txCommitId);
+  console.log('  ✓ Transaction Atomicity & Rollback Verified');
+
+  console.log('\n=== ALL UNIT TESTS PASSED (18/18) ===\n');
 }

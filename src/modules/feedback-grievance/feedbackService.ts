@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { db } from '../../lib/db.js';
+import { db, withTransaction } from '../../lib/db.js';
 import type {
   FeedbackSurvey,
   FeedbackQuestion,
@@ -47,22 +47,25 @@ export class FeedbackService {
       createdAt: new Date(),
     };
 
-    await db.feedbackSurveys.set(surveyId, survey);
+    // A survey without its questions is useless, so create both atomically.
+    return withTransaction(async (tx) => {
+      await tx.feedbackSurveys.set(surveyId, survey);
 
-    const createdQuestions: FeedbackQuestion[] = [];
-    for (const q of req.questions) {
-      const questionId = `q-${crypto.randomUUID()}`;
-      const question: FeedbackQuestion = {
-        id: questionId,
-        surveyId,
-        questionText: q.questionText,
-        category: q.category,
-      };
-      await db.feedbackQuestions.set(questionId, question);
-      createdQuestions.push(question);
-    }
+      const createdQuestions: FeedbackQuestion[] = [];
+      for (const q of req.questions) {
+        const questionId = `q-${crypto.randomUUID()}`;
+        const question: FeedbackQuestion = {
+          id: questionId,
+          surveyId,
+          questionText: q.questionText,
+          category: q.category,
+        };
+        await tx.feedbackQuestions.set(questionId, question);
+        createdQuestions.push(question);
+      }
 
-    return { survey, questions: createdQuestions };
+      return { survey, questions: createdQuestions };
+    });
   }
 
   /**

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { db } from '../../lib/db.js';
+import { withTransaction } from '../../lib/db.js';
 
 /**
  * Module 3: DigiLocker NAD & APAAR / Academic Bank of Credits (ABC) Sync
@@ -74,18 +74,22 @@ export class DigiLockerSyncService {
    */
   async pushToDigiLocker(record: DigiLockerCreditRecord): Promise<{ success: boolean; ackId: string }> {
     const ackId = `NAD-${crypto.randomUUID()}`;
-    for (const c of record.courses) {
-      await db.abcRecords.set(`${record.apaarId}-${c.courseCode}`, {
-        id: `abc-${crypto.randomUUID()}`,
-        studentId: record.studentRollNumber,
-        apaarId: record.apaarId,
-        courseId: c.courseCode,
-        academicYear: record.academicYear,
-        creditsEarned: c.credits,
-        gradeObtained: c.letterGrade,
-        status: 'SYNCED',
-      });
-    }
+    // The whole credit batch is pushed as one unit — a NAD sync should be
+    // all-or-nothing rather than leaving a partially synced transcript.
+    await withTransaction(async (tx) => {
+      for (const c of record.courses) {
+        await tx.abcRecords.set(`${record.apaarId}-${c.courseCode}`, {
+          id: `abc-${crypto.randomUUID()}`,
+          studentId: record.studentRollNumber,
+          apaarId: record.apaarId,
+          courseId: c.courseCode,
+          academicYear: record.academicYear,
+          creditsEarned: c.credits,
+          gradeObtained: c.letterGrade,
+          status: 'SYNCED',
+        });
+      }
+    });
 
     return { success: true, ackId };
   }

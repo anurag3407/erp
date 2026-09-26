@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { db } from '../../lib/db.js';
+import { db, withTransaction } from '../../lib/db.js';
 import type {
   InAppNotification,
   WebPushSubscription,
@@ -126,16 +126,20 @@ export class NotificationCenter {
    */
   async markAllAsRead(userId: string): Promise<number> {
     const aliases = await this.getUserIdAliases(userId);
-    let count = 0;
-    for (const notif of await db.notifications.values()) {
-      if (aliases.has(notif.userId) && !notif.isRead) {
-        notif.isRead = true;
-        notif.readAt = new Date();
-        await db.notifications.set(notif.id, notif);
-        count++;
+    // Bulk read-flip is one atomic unit so the count always matches the rows
+    // actually marked read.
+    return withTransaction(async (tx) => {
+      let count = 0;
+      for (const notif of await tx.notifications.values()) {
+        if (aliases.has(notif.userId) && !notif.isRead) {
+          notif.isRead = true;
+          notif.readAt = new Date();
+          await tx.notifications.set(notif.id, notif);
+          count++;
+        }
       }
-    }
-    return count;
+      return count;
+    });
   }
 
   /**

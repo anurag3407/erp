@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { db } from '../../lib/db.js';
+import { db, withTransaction } from '../../lib/db.js';
 import type {
   AttendanceRecord,
   AttendanceOverrideReasonCode,
@@ -40,58 +40,61 @@ export class AttendanceOverrideService {
       throw new Error('Reason description is mandatory for attendance overrides');
     }
 
-    // 2. Fetch existing attendance record
-    const record = await db.attendanceRecords.get(req.attendanceRecordId);
-    if (!record) {
-      throw new Error(`Attendance record not found: ${req.attendanceRecordId}`);
-    }
-
-    const previousStatus = record.status;
-
-    // 3. Optional Leave Validation
-    if (req.linkedLeaveApplicationId) {
-      const leave = await db.leaveApplications.get(req.linkedLeaveApplicationId);
-      if (!leave) {
-        throw new Error(`Linked leave application not found: ${req.linkedLeaveApplicationId}`);
+    // 2. The record update and its immutable audit log must land together —
+    //    an override with no audit trail is a compliance violation.
+    return withTransaction(async (tx) => {
+      const record = await tx.attendanceRecords.get(req.attendanceRecordId);
+      if (!record) {
+        throw new Error(`Attendance record not found: ${req.attendanceRecordId}`);
       }
-      if (leave.status !== 'APPROVED') {
-        throw new Error(`Cannot link unapproved leave application (status: ${leave.status})`);
+
+      const previousStatus = record.status;
+
+      // 3. Optional Leave Validation
+      if (req.linkedLeaveApplicationId) {
+        const leave = await tx.leaveApplications.get(req.linkedLeaveApplicationId);
+        if (!leave) {
+          throw new Error(`Linked leave application not found: ${req.linkedLeaveApplicationId}`);
+        }
+        if (leave.status !== 'APPROVED') {
+          throw new Error(`Cannot link unapproved leave application (status: ${leave.status})`);
+        }
+        if (leave.applicantId !== record.studentId) {
+          throw new Error('Leave application applicant does not match attendance record student');
+        }
       }
-      if (leave.applicantId !== record.studentId) {
-        throw new Error('Leave application applicant does not match attendance record student');
-      }
-    }
 
-    // 4. Update attendance record
-    record.status = req.newStatus;
-    record.verificationMethod = 'MANUAL';
+      // 4. Update attendance record
+      record.status = req.newStatus;
+      record.verificationMethod = 'MANUAL';
 
-    // 5. Create immutable audit log entry
-    const logId = `att-log-${crypto.randomUUID()}`;
-    const auditLog: AttendanceOverrideAuditLog = {
-      id: logId,
-      attendanceRecordId: record.id,
-      studentId: record.studentId,
-      offeringId: record.offeringId,
-      previousStatus,
-      newStatus: req.newStatus,
-      reasonCode: req.reasonCode,
-      reasonDescription: req.reasonDescription,
-      modifiedByUserId: req.modifiedByUserId,
-      modifiedByRole: req.modifiedByRole,
-      linkedLeaveApplicationId: req.linkedLeaveApplicationId,
-      timestamp: new Date(),
-    };
+      // 5. Create immutable audit log entry
+      const logId = `att-log-${crypto.randomUUID()}`;
+      const auditLog: AttendanceOverrideAuditLog = {
+        id: logId,
+        attendanceRecordId: record.id,
+        studentId: record.studentId,
+        offeringId: record.offeringId,
+        previousStatus,
+        newStatus: req.newStatus,
+        reasonCode: req.reasonCode,
+        reasonDescription: req.reasonDescription,
+        modifiedByUserId: req.modifiedByUserId,
+        modifiedByRole: req.modifiedByRole,
+        linkedLeaveApplicationId: req.linkedLeaveApplicationId,
+        timestamp: new Date(),
+      };
 
-    await db.attendanceRecords.set(record.id, record);
-    await db.attendanceOverrideAuditLogs.set(logId, auditLog);
+      await tx.attendanceRecords.set(record.id, record);
+      await tx.attendanceOverrideAuditLogs.set(logId, auditLog);
 
-    return {
-      success: true,
-      previousStatus,
-      updatedRecord: record,
-      auditLog,
-    };
+      return {
+        success: true,
+        previousStatus,
+        updatedRecord: record,
+        auditLog,
+      };
+    });
   }
 
   /**

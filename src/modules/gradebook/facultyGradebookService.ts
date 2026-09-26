@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { db } from '../../lib/db.js';
+import { db, withTransaction } from '../../lib/db.js';
 import type {
   CiaGradeEntry,
   BulkGradeUpsertItem,
@@ -203,13 +203,17 @@ export class FacultyGradebookService {
    */
   async lockGradebook(offeringId: string, _facultyUserId: string): Promise<{ offeringId: string; locked: boolean }> {
     this.lockedOfferings.add(offeringId);
-    for (const entry of await db.ciaGradeEntries.values()) {
-      if (entry.offeringId === offeringId) {
-        entry.locked = true;
-        await db.ciaGradeEntries.set(`${entry.offeringId}:${entry.studentId}:${entry.component}`, entry);
+    // Flipping `locked` across every entry of the offering must be atomic, or
+    // a partial failure leaves the gradebook half-frozen.
+    return withTransaction(async (tx) => {
+      for (const entry of await tx.ciaGradeEntries.values()) {
+        if (entry.offeringId === offeringId) {
+          entry.locked = true;
+          await tx.ciaGradeEntries.set(`${entry.offeringId}:${entry.studentId}:${entry.component}`, entry);
+        }
       }
-    }
-    return { offeringId, locked: true };
+      return { offeringId, locked: true };
+    });
   }
 
   /**
@@ -217,13 +221,15 @@ export class FacultyGradebookService {
    */
   async unlockGradebook(offeringId: string): Promise<{ offeringId: string; locked: boolean }> {
     this.lockedOfferings.delete(offeringId);
-    for (const entry of await db.ciaGradeEntries.values()) {
-      if (entry.offeringId === offeringId) {
-        entry.locked = false;
-        await db.ciaGradeEntries.set(`${entry.offeringId}:${entry.studentId}:${entry.component}`, entry);
+    return withTransaction(async (tx) => {
+      for (const entry of await tx.ciaGradeEntries.values()) {
+        if (entry.offeringId === offeringId) {
+          entry.locked = false;
+          await tx.ciaGradeEntries.set(`${entry.offeringId}:${entry.studentId}:${entry.component}`, entry);
+        }
       }
-    }
-    return { offeringId, locked: false };
+      return { offeringId, locked: false };
+    });
   }
 }
 
