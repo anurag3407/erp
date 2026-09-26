@@ -2,6 +2,7 @@
 
 import {
   db,
+  authService,
   attendanceService,
   courseCheckoutService,
   curriculumDagEngine,
@@ -24,8 +25,15 @@ import {
   provisionalPassSchema,
   libraryActionSchema,
   whatIfSimulationSchema,
+  loginSchema,
 } from "../lib/validations";
 import { ZodError } from "zod";
+import {
+  setSessionCookie,
+  clearSessionCookie,
+  getSessionId,
+  getCurrentSession,
+} from "../lib/session";
 
 /**
  * Convert a thrown error into a client-safe message.
@@ -56,10 +64,79 @@ export interface ServerActionResponse<T = any> {
   error?: string;
 }
 
-// 1. Dashboard Overview Data
-export async function getDashboardData(role: string = "Student"): Promise<ServerActionResponse> {
+/**
+ * Resolve the authenticated actor for an action. Identity is always derived
+ * from the server-side session — never from client-supplied ids.
+ */
+async function requireActor(): Promise<{ userId: string; role: string; name: string }> {
+  const session = await getCurrentSession();
+  if (!session) {
+    throw new Error("UNAUTHENTICATED: You must sign in to perform this action");
+  }
+  return { userId: session.userId, role: session.role, name: session.name };
+}
+
+// 0. Authentication & Session Lifecycle
+export async function login(email: string, password: string): Promise<ServerActionResponse> {
   try {
-    const studentId = "usr-stu-01";
+    const valid = loginSchema.parse({ email, password });
+    const result = await authService.login({
+      method: "PASSWORD",
+      email: valid.email,
+      password: valid.password,
+    });
+    if (!result) {
+      return { success: false, error: "INVALID_CREDENTIALS: Email or password is incorrect" };
+    }
+    await setSessionCookie(result.session.id);
+    return {
+      success: true,
+      data: {
+        userId: result.user.userId,
+        role: result.user.role,
+        name: result.user.name,
+        email: result.user.email,
+      },
+    };
+  } catch (err: any) {
+    return { success: false, error: toClientError(err, "Login failed") };
+  }
+}
+
+export async function logout(): Promise<ServerActionResponse> {
+  try {
+    const sessionId = await getSessionId();
+    if (sessionId) {
+      await authService.logout(sessionId);
+    }
+    await clearSessionCookie();
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: toClientError(err, "Logout failed") };
+  }
+}
+
+export async function getCurrentUser(): Promise<ServerActionResponse> {
+  const session = await getCurrentSession();
+  if (!session) {
+    return { success: false, error: "UNAUTHENTICATED" };
+  }
+  return {
+    success: true,
+    data: {
+      userId: session.userId,
+      role: session.role,
+      name: session.name,
+      email: session.email,
+    },
+  };
+}
+
+// 1. Dashboard Overview Data
+export async function getDashboardData(_role?: string): Promise<ServerActionResponse> {
+  try {
+    const actor = await requireActor();
+    const studentId = actor.userId;
     const profile = (await db.studentProfiles.values()).find((p) => p.userId === studentId || p.id === studentId);
     const totalClasses = await db.courseOfferings.count();
 
@@ -94,7 +171,7 @@ export async function getDashboardData(role: string = "Student"): Promise<Server
           totalEarnedCredits: profile.totalEarnedCredits,
           academicStatus: profile.academicStatus,
         } : null,
-        role,
+        role: actor.role,
       },
     };
   } catch (err: any) {
@@ -128,9 +205,10 @@ export async function getCourseCatalog(): Promise<ServerActionResponse> {
   }
 }
 
-export async function enrollInCourse(offeringId: string, studentId: string = "usr-stu-01"): Promise<ServerActionResponse> {
+export async function enrollInCourse(offeringId: string, _studentId?: string): Promise<ServerActionResponse> {
   try {
-    const valid = courseEnrollmentSchema.parse({ offeringId, studentId });
+    const actor = await requireActor();
+    const valid = courseEnrollmentSchema.parse({ offeringId, studentId: actor.userId });
     const result = await courseCheckoutService.checkoutCourses(valid.studentId, [valid.offeringId]);
     return { success: true, data: result };
   } catch (err: any) {
@@ -145,7 +223,8 @@ export async function markAttendancePunch(payload?: {
   token?: string;
 }): Promise<ServerActionResponse> {
   try {
-    const studentId = payload?.studentId || "usr-stu-01";
+    const actor = await requireActor();
+    const studentId = actor.userId;
     const offering = payload?.offeringId
       ? await db.courseOfferings.get(payload.offeringId)
       : (await db.courseOfferings.values())[0];
@@ -171,8 +250,8 @@ export async function markAttendancePunch(payload?: {
 }
 
 // Backwards compatibility alias for existing page.tsx calls
-export async function markManualAttendance(studentId: string = "usr-stu-01") {
-  return markAttendancePunch({ studentId });
+export async function markManualAttendance() {
+  return markAttendancePunch();
 }
 
 // 4. Timetable Schedule
@@ -202,8 +281,10 @@ export async function getTimetableMatrix(): Promise<ServerActionResponse> {
 }
 
 // 5. Degree Audit & What-If Simulation
-export async function getDegreeAudit(studentId: string = "usr-stu-01"): Promise<ServerActionResponse> {
+export async function getDegreeAudit(_studentId?: string): Promise<ServerActionResponse> {
   try {
+    const actor = await requireActor();
+    const studentId = actor.userId;
     const profile = (await db.studentProfiles.values()).find(
       (p) => p.userId === studentId || p.id === studentId
     );
@@ -233,9 +314,10 @@ export async function getDegreeAudit(studentId: string = "usr-stu-01"): Promise<
   }
 }
 
-export async function simulateWhatIf(targetProgramId: string, studentId: string = "usr-stu-01"): Promise<ServerActionResponse> {
+export async function simulateWhatIf(targetProgramId: string, _studentId?: string): Promise<ServerActionResponse> {
   try {
-    const valid = whatIfSimulationSchema.parse({ targetProgramId, studentId });
+    const actor = await requireActor();
+    const valid = whatIfSimulationSchema.parse({ targetProgramId, studentId: actor.userId });
     const profile = (await db.studentProfiles.values()).find((p) => p.userId === valid.studentId || p.id === valid.studentId);
     if (!profile) return { success: false, error: "Profile not found" };
 
@@ -257,8 +339,10 @@ export async function simulateWhatIf(targetProgramId: string, studentId: string 
 }
 
 // 6. Fees, Ledger & 48-Hour Provisional Pass
-export async function getFeeTransactions(studentId: string = "usr-stu-01"): Promise<ServerActionResponse> {
+export async function getFeeTransactions(_studentId?: string): Promise<ServerActionResponse> {
   try {
+    const actor = await requireActor();
+    const studentId = actor.userId;
     const profile = (await db.studentProfiles.values()).find((p) => p.userId === studentId || p.id === studentId);
     const targetId = profile ? profile.id : studentId;
 
@@ -277,9 +361,10 @@ export async function getFeeTransactions(studentId: string = "usr-stu-01"): Prom
   }
 }
 
-export async function payFeeTransaction(transactionId: string, studentId: string = "usr-stu-01"): Promise<ServerActionResponse> {
+export async function payFeeTransaction(transactionId: string, _studentId?: string): Promise<ServerActionResponse> {
   try {
-    const valid = feePaymentSchema.parse({ transactionId, studentId });
+    const actor = await requireActor();
+    const valid = feePaymentSchema.parse({ transactionId, studentId: actor.userId });
     const allTxs = await db.paymentTransactions.values();
     const tx = allTxs.find((t) => t.id === valid.transactionId || t.orderId === valid.transactionId);
     if (!tx) return { success: false, error: "Transaction not found" };
@@ -293,9 +378,10 @@ export async function payFeeTransaction(transactionId: string, studentId: string
   }
 }
 
-export async function requestProvisionalPass(reason: string, studentId: string = "usr-stu-01"): Promise<ServerActionResponse> {
+export async function requestProvisionalPass(reason: string, _studentId?: string): Promise<ServerActionResponse> {
   try {
-    const valid = provisionalPassSchema.parse({ studentId, reason });
+    const actor = await requireActor();
+    const valid = provisionalPassSchema.parse({ studentId: actor.userId, reason });
     const profile = (await db.studentProfiles.values()).find((p) => p.userId === valid.studentId || p.id === valid.studentId);
     const targetStudentId = profile ? profile.id : valid.studentId;
 
@@ -331,9 +417,10 @@ export async function getLibraryBooks(): Promise<ServerActionResponse> {
   }
 }
 
-export async function borrowLibraryBook(bookId: string, borrowerId: string = "usr-stu-01"): Promise<ServerActionResponse> {
+export async function borrowLibraryBook(bookId: string, _borrowerId?: string): Promise<ServerActionResponse> {
   try {
-    const valid = libraryActionSchema.parse({ bookId, borrowerId });
+    const actor = await requireActor();
+    const valid = libraryActionSchema.parse({ bookId, borrowerId: actor.userId });
     const profile = (await db.studentProfiles.values()).find((p) => p.userId === valid.borrowerId || p.id === valid.borrowerId);
     const targetStudentId = profile ? profile.id : valid.borrowerId;
 
@@ -345,8 +432,10 @@ export async function borrowLibraryBook(bookId: string, borrowerId: string = "us
 }
 
 // 8. Leaves & Grievance Redressal
-export async function getLeaveApplications(userId: string = "usr-stu-01"): Promise<ServerActionResponse> {
+export async function getLeaveApplications(_userId?: string): Promise<ServerActionResponse> {
   try {
+    const actor = await requireActor();
+    const userId = actor.userId;
     const leaves = (await db.leaveApplications.values())
       .filter((l) => l.applicantId === userId)
       .map((l) => ({
@@ -374,9 +463,10 @@ export async function submitLeave(data: {
   applicantId?: string;
 }): Promise<ServerActionResponse> {
   try {
+    const actor = await requireActor();
     const valid = leaveApplicationSchema.parse({
-      applicantId: data.applicantId || "usr-stu-01",
-      applicantRole: data.applicantRole || "STUDENT",
+      applicantId: actor.userId,
+      applicantRole: actor.role === "FACULTY" ? "FACULTY" : "STUDENT",
       leaveType: data.leaveType,
       startDate: data.startDate,
       endDate: data.endDate,
@@ -413,12 +503,12 @@ export async function submitGrievance(data: {
   category: "ANTI_RAGGING" | "ACADEMIC" | "HARASSMENT_POSH" | "INFRASTRUCTURE";
   subject: string;
   description: string;
-  isAnonymous?: boolean;
-}): Promise<ServerActionResponse> {
+  isAnonymous?: boolean;  }): Promise<ServerActionResponse> {
   try {
+    const actor = await requireActor();
     const valid = grievanceSubmissionSchema.parse({
       ...data,
-      complainantId: data.isAnonymous ? undefined : "usr-stu-01",
+      complainantId: data.isAnonymous ? undefined : actor.userId,
     });
 
     const categoryMap: Record<string, GrievanceCategory> = {
@@ -442,18 +532,20 @@ export async function submitGrievance(data: {
 }
 
 // 9. Notifications Center
-export async function getNotifications(userId: string = "usr-stu-01"): Promise<ServerActionResponse> {
+export async function getNotifications(_userId?: string): Promise<ServerActionResponse> {
   try {
-    const notifs = await notificationCenter.getInbox(userId);
+    const actor = await requireActor();
+    const notifs = await notificationCenter.getInbox(actor.userId);
     return { success: true, data: notifs };
   } catch (err: any) {
     return { success: false, error: toClientError(err, "Request failed") };
   }
 }
 
-export async function markNotificationAsRead(id: string, userId: string = "usr-stu-01"): Promise<ServerActionResponse> {
+export async function markNotificationAsRead(id: string, _userId?: string): Promise<ServerActionResponse> {
   try {
-    const notif = await notificationCenter.markAsRead(id, userId);
+    const actor = await requireActor();
+    const notif = await notificationCenter.markAsRead(id, actor.userId);
     return { success: true, data: notif };
   } catch (err: any) {
     return { success: false, error: toClientError(err, "Request failed") };

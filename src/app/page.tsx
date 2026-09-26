@@ -44,6 +44,8 @@ import {
   submitGrievance,
   getNotifications,
   markNotificationAsRead,
+  getCurrentUser,
+  logout,
 } from "./actions";
 
 type Role = "Student" | "Faculty" | "HOD" | "Admin";
@@ -86,6 +88,32 @@ export default function ERPDashboard() {
   const showToast = (type: "success" | "error", text: string) => {
     setToastMessage({ type, text });
     setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  // Require an authenticated session before rendering the dashboard.
+  useEffect(() => {
+    (async () => {
+      const res = await getCurrentUser();
+      if (!res.success) {
+        window.location.href = "/login";
+        return;
+      }
+      const sessionRole = String(res.data?.role ?? "STUDENT");
+      const mapped: Role =
+        sessionRole === "FACULTY" || sessionRole === "MENTOR"
+          ? "Faculty"
+          : sessionRole === "HOD" || sessionRole === "DEAN"
+            ? "HOD"
+            : sessionRole === "SUPER_ADMIN" || sessionRole === "REGISTRAR" || sessionRole === "COE"
+              ? "Admin"
+              : "Student";
+      setRole(mapped);
+    })();
+  }, []);
+
+  const handleLogout = async () => {
+    await logout();
+    window.location.href = "/login";
   };
 
   // Initial load and tab transitions
@@ -391,6 +419,12 @@ export default function ERPDashboard() {
                 <p className="font-semibold text-slate-800">{role === "Student" ? "Alex Rivera" : "Dr. Alan Turing"}</p>
                 <p className="text-slate-500">{role}</p>
               </div>
+              <button
+                onClick={handleLogout}
+                className="text-xs font-medium text-slate-500 hover:text-slate-800 px-2 py-1 rounded-md hover:bg-slate-100"
+              >
+                Sign out
+              </button>
             </div>
           </div>
         </header>

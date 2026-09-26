@@ -5,6 +5,11 @@ import { z } from 'zod';
  * Comprehensive security validation for server actions and API requests
  */
 
+export const loginSchema = z.object({
+  email: z.string().trim().toLowerCase().email('A valid email is required').max(255),
+  password: z.string().min(1, 'Password is required').max(200),
+});
+
 export const attendancePunchSchema = z.object({
   studentId: z.string().min(1, 'Student ID is required').max(100),
   offeringId: z.string().min(1, 'Course offering ID is required').max(100),

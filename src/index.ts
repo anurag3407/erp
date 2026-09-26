@@ -8,8 +8,13 @@ export * from './types/index.js';
 
 // Infrastructure & Primitives
 export * from './lib/crypto.js';
+export * from './lib/password.js';
 export * from './lib/redis.js';
 export * from './lib/db.js';
+
+// Authentication & Sessions
+export * from './modules/auth/sessionStore.js';
+export * from './modules/auth/authService.js';
 
 // Module 1: High-Concurrency Course Registration & Waiting Room
 export * from './modules/registration/waitingRoom.js';

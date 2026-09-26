@@ -116,6 +116,22 @@ export class SqlStore<T extends object> {
     return (await this.get(key)) !== undefined;
   }
 
+  /**
+   * Look up a single row by a whitelisted column (e.g. `findOne('email', …)`).
+   * The column must be part of this store's known columns, so the identifier
+   * is never attacker-controlled, and the value is always parameterized.
+   */
+  async findOne(column: string, value: string | number | boolean | Date): Promise<T | undefined> {
+    if (!this.cfg.columns.includes(column)) {
+      throw new Error(`Unknown column '${column}' for table ${this.cfg.table}`);
+    }
+    const rows = await this.exec.unsafe<Row[]>(
+      `select * from ${ident(this.cfg.table)} where ${ident(column)} = $1 limit 1`,
+      [value]
+    );
+    return rows.length > 0 ? this.toDomain(rows[0]) : undefined;
+  }
+
   async values(): Promise<T[]> {
     const rows = await this.exec.unsafe<Row[]>(`select * from ${ident(this.cfg.table)}`);
     return rows.map((r) => this.toDomain(r));

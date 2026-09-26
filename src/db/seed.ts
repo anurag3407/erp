@@ -1,4 +1,5 @@
 import { sql } from './client.js';
+import { hashPassword } from '../lib/password.js';
 
 /**
  * Seeds the demo institutional fixtures into PostgreSQL.
@@ -17,6 +18,12 @@ export async function truncateAll(): Promise<void> {
 }
 
 export async function seedDatabase(): Promise<void> {
+  // Seeded accounts share one documented development password. Replace it (or
+  // provision real accounts) before exposing this instance to anyone.
+  const seedPassword =
+    process.env.SEED_DEFAULT_PASSWORD || 'ChangeMe!2026Secure';
+  const passwordHash = await hashPassword(seedPassword, true);
+
   // 1. Departments
   await sql`
     INSERT INTO departments (id, code, name) VALUES
@@ -36,19 +43,19 @@ export async function seedDatabase(): Promise<void> {
   // 3. Users (all 12 institutional roles)
   await sql`
     INSERT INTO users (id, email, name, role, department_id, password_hash) VALUES
-      ('usr-admin-01',   'registrar@enterprise-college.edu',      'Dr. Sarah Jenkins',   'REGISTRAR',       NULL,             'seeded'),
-      ('usr-coe-01',     'coe@enterprise-college.edu',            'Prof. Rajesh Sharma', 'COE',             NULL,             'seeded'),
-      ('usr-fac-01',     'alan.turing@enterprise-college.edu',    'Prof. Alan Turing',   'FACULTY',         'dept-cse',       'seeded'),
-      ('usr-mentor-01',  'ada.lovelace@enterprise-college.edu',   'Dr. Ada Lovelace',    'MENTOR',          'dept-cse',       'seeded'),
-      ('usr-stu-01',     'rohit.kumar@student.enterprise.edu',    'Rohit Kumar',         'STUDENT',         NULL,             'seeded'),
-      ('usr-hod-01',     'hod.cse@enterprise-college.edu',        'Dr. Margaret Hamilton','HOD',            'dept-cse',       'seeded'),
-      ('usr-parent-01',  'suresh.kumar@family.edu',               'Suresh Kumar',        'PARENT',          NULL,             'seeded'),
-      ('usr-parent-02',  'meena.kumar@family.edu',                'Meena Kumar',         'PARENT',          NULL,             'seeded'),
-      ('usr-lib-01',     'library@enterprise-college.edu',        'Mr. Melvil Dewey',    'LIBRARIAN',       NULL,             'seeded'),
-      ('usr-fin-01',     'bursar@enterprise-college.edu',         'Ms. Janet Yellen',    'FINANCE_OFFICER', NULL,             'seeded'),
-      ('usr-dean-01',    'dean.academics@enterprise-college.edu', 'Prof. Donald Knuth',  'DEAN',            'dept-cse',       'seeded'),
-      ('usr-warden-01',  'warden.hostel1@enterprise-college.edu', 'Dr. Robert Flores',   'WARDEN',          NULL,             'seeded'),
-      ('usr-fac-02',     'grace.hopper@enterprise-college.edu',   'Prof. Grace Hopper',  'FACULTY',         'dept-cse',       'seeded')
+      ('usr-admin-01',   'registrar@enterprise-college.edu',      'Dr. Sarah Jenkins',   'REGISTRAR',       NULL,             ${passwordHash}),
+      ('usr-coe-01',     'coe@enterprise-college.edu',            'Prof. Rajesh Sharma', 'COE',             NULL,             ${passwordHash}),
+      ('usr-fac-01',     'alan.turing@enterprise-college.edu',    'Prof. Alan Turing',   'FACULTY',         'dept-cse',       ${passwordHash}),
+      ('usr-mentor-01',  'ada.lovelace@enterprise-college.edu',   'Dr. Ada Lovelace',    'MENTOR',          'dept-cse',       ${passwordHash}),
+      ('usr-stu-01',     'rohit.kumar@student.enterprise.edu',    'Rohit Kumar',         'STUDENT',         NULL,             ${passwordHash}),
+      ('usr-hod-01',     'hod.cse@enterprise-college.edu',        'Dr. Margaret Hamilton','HOD',            'dept-cse',       ${passwordHash}),
+      ('usr-parent-01',  'suresh.kumar@family.edu',               'Suresh Kumar',        'PARENT',          NULL,             ${passwordHash}),
+      ('usr-parent-02',  'meena.kumar@family.edu',                'Meena Kumar',         'PARENT',          NULL,             ${passwordHash}),
+      ('usr-lib-01',     'library@enterprise-college.edu',        'Mr. Melvil Dewey',    'LIBRARIAN',       NULL,             ${passwordHash}),
+      ('usr-fin-01',     'bursar@enterprise-college.edu',         'Ms. Janet Yellen',    'FINANCE_OFFICER', NULL,             ${passwordHash}),
+      ('usr-dean-01',    'dean.academics@enterprise-college.edu', 'Prof. Donald Knuth',  'DEAN',            'dept-cse',       ${passwordHash}),
+      ('usr-warden-01',  'warden.hostel1@enterprise-college.edu', 'Dr. Robert Flores',   'WARDEN',          NULL,             ${passwordHash}),
+      ('usr-fac-02',     'grace.hopper@enterprise-college.edu',   'Prof. Grace Hopper',  'FACULTY',         'dept-cse',       ${passwordHash})
     ON CONFLICT (id) DO NOTHING
   `;
 
