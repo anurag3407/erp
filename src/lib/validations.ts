@@ -10,6 +10,43 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Password is required').max(200),
 });
 
+const institutionalRoles = [
+  'SUPER_ADMIN',
+  'REGISTRAR',
+  'DEAN',
+  'HOD',
+  'FACULTY',
+  'STUDENT',
+  'PARENT',
+  'COE',
+  'FINANCE_OFFICER',
+  'LIBRARIAN',
+  'WARDEN',
+  'MENTOR',
+] as const;
+
+export const createUserSchema = z.object({
+  email: z.string().trim().toLowerCase().email('A valid email is required').max(255),
+  name: z.string().trim().min(2, 'Name is required').max(150),
+  role: z.enum(institutionalRoles),
+  departmentId: z.string().max(100).optional(),
+  password: z.string().min(12, 'Password must be at least 12 characters').max(200).optional(),
+});
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required').max(200),
+  newPassword: z.string().min(12, 'New password must be at least 12 characters').max(200),
+});
+
+export const resetRequestSchema = z.object({
+  email: z.string().trim().toLowerCase().email('A valid email is required').max(255),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(20, 'Reset token is required').max(200),
+  newPassword: z.string().min(12, 'New password must be at least 12 characters').max(200),
+});
+
 export const attendancePunchSchema = z.object({
   studentId: z.string().min(1, 'Student ID is required').max(100),
   offeringId: z.string().min(1, 'Course offering ID is required').max(100),

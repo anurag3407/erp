@@ -127,10 +127,12 @@ export class RbacGuard {
     STUDENT: new Set<RbacPermission>([
       'COURSE_REGISTER',
       'ADD_DROP_COURSE',
+      'ATTENDANCE_MARK_SELF',
       'ATTENDANCE_VIEW_SELF',
       'LEAVE_APPLY_SELF',
       'FEE_PAY',
       'FEE_VIEW',
+      'LIBRARY_BORROW_SELF',
       'GRIEVANCE_FILE',
       'FEEDBACK_SUBMIT',
       'NOTIFICATION_READ',
@@ -297,6 +299,42 @@ export class RbacGuard {
       pathPattern: /^\/api\/grades\/lock/,
       allowedRoles: ['COE', 'REGISTRAR', 'DEAN', 'SUPER_ADMIN'],
       requiredPermissions: ['GRADE_LOCK'],
+    },
+    // Self-service endpoints — any authenticated role may call these.
+    {
+      pathPattern: /^\/api\/self/,
+      allowedRoles: ALL_INSTITUTIONAL_ROLES,
+      requiredPermissions: ['NOTIFICATION_READ'],
+    },
+    {
+      pathPattern: /^\/api\/attendance\/punch/,
+      allowedRoles: ['STUDENT', 'FACULTY', 'SUPER_ADMIN'],
+      requiredPermissions: ['ATTENDANCE_MARK', 'ATTENDANCE_MARK_SELF'],
+    },
+    {
+      pathPattern: /^\/api\/fees\/ledger/,
+      allowedRoles: ['STUDENT', 'PARENT', 'REGISTRAR', 'FINANCE_OFFICER', 'SUPER_ADMIN'],
+      requiredPermissions: ['FEE_VIEW'],
+    },
+    {
+      pathPattern: /^\/api\/fees\/pay/,
+      allowedRoles: ['STUDENT', 'PARENT', 'SUPER_ADMIN'],
+      requiredPermissions: ['FEE_PAY'],
+    },
+    {
+      pathPattern: /^\/api\/finance\/provisional-pass/,
+      allowedRoles: ['STUDENT', 'PARENT', 'FINANCE_OFFICER', 'SUPER_ADMIN'],
+      requiredPermissions: ['FEE_PAY', 'FEE_RECONCILE', 'FEE_VIEW'],
+    },
+    {
+      pathPattern: /^\/api\/library\/borrow/,
+      allowedRoles: ['STUDENT', 'LIBRARIAN', 'SUPER_ADMIN'],
+      requiredPermissions: ['LIBRARY_BORROW_SELF', 'LIBRARY_CIRCULATE'],
+    },
+    {
+      pathPattern: /^\/api\/users/,
+      allowedRoles: ['SUPER_ADMIN', 'REGISTRAR'],
+      requiredPermissions: ['USER_MANAGE'],
     },
   ];
 

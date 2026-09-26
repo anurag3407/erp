@@ -8,6 +8,7 @@ import { runUnitTests } from './unit/modules.test.js';
 import { runOperationalGapsTests } from './unit/operational-gaps.test.js';
 import { runEdgeCaseTests } from './unit/edge-cases.test.js';
 import { runAuthTests } from './unit/auth.test.js';
+import { runRbacEnforcementTests } from './unit/rbac-enforcement.test.js';
 import { runIntegrationTests } from './integration/concurrency.test.js';
 import { runE2EWorkflowTests } from './e2e/e2e-workflow.test.js';
 import { runGapVerificationScanner } from './gap-scanner.js';
@@ -27,6 +28,7 @@ async function main() {
 
   let unitPassed = false;
   let authPassed = false;
+  let rbacPassed = false;
   let operationalPassed = false;
   let edgePassed = false;
   let integrationPassed = false;
@@ -41,6 +43,10 @@ async function main() {
     // 1b. Authentication & Session Suite
     await runAuthTests();
     authPassed = true;
+
+    // 1c. Server-action RBAC Enforcement Suite
+    await runRbacEnforcementTests();
+    rbacPassed = true;
 
     // 2. 9 Operational Gaps Verification Suite
     await runOperationalGapsTests();
@@ -73,7 +79,8 @@ async function main() {
     console.log(`║ 4. Integration & Stress Suite (5,000 CUs):       [ ${integrationPassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
     console.log(`║ 5. End-to-End Lifecycle Workflow (11 Steps):     [ ${e2ePassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
     console.log(`║ 6. Competitive Gap Scanner (19 Modules):         [ ${gapScannerPassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
-    console.log(`║ 7. Authentication & Session Suite (6 Cases):     [ ${authPassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
+    console.log(`║ 7. Authentication & Session Suite (9 Cases):     [ ${authPassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
+    console.log(`║ 8. Server-Action RBAC Enforcement (5 Cases):     [ ${rbacPassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
     console.log('╠════════════════════════════════════════════════════════════════════════════╣');
     console.log(`║ TOTAL ELAPSED TIME: ${masterDuration.toFixed(2)}ms                                              ║`);
     console.log('║ FINAL STATUS: 100% PASSING - ALL 9 OPERATIONAL GAPS CLOSED                 ║');

@@ -14,6 +14,7 @@ export * from './lib/db.js';
 
 // Authentication & Sessions
 export * from './modules/auth/sessionStore.js';
+export * from './modules/auth/loginThrottle.js';
 export * from './modules/auth/authService.js';
 
 // Module 1: High-Concurrency Course Registration & Waiting Room

@@ -3,6 +3,7 @@
 import {
   db,
   authService,
+  rbacGuard,
   attendanceService,
   courseCheckoutService,
   curriculumDagEngine,
@@ -14,6 +15,7 @@ import {
   notificationCenter,
   type Course,
   type GrievanceCategory,
+  type UserRole,
 } from "../index";
 
 import {
@@ -26,7 +28,12 @@ import {
   libraryActionSchema,
   whatIfSimulationSchema,
   loginSchema,
+  createUserSchema,
+  changePasswordSchema,
+  resetRequestSchema,
+  resetPasswordSchema,
 } from "../lib/validations";
+import { headers } from "next/headers";
 import { ZodError } from "zod";
 import {
   setSessionCookie,
@@ -76,30 +83,147 @@ async function requireActor(): Promise<{ userId: string; role: string; name: str
   return { userId: session.userId, role: session.role, name: session.name };
 }
 
+/**
+ * Authorize the current session against a logical route rule using rbacGuard,
+ * then return the actor. Throws FORBIDDEN when the session role lacks the
+ * permission the endpoint requires — so every action is access-controlled.
+ */
+async function authorizeAction(
+  path: string
+): Promise<{ userId: string; role: string; name: string }> {
+  const actor = await requireActor();
+  const result = rbacGuard.authorizeRoute(actor.role as UserRole, path);
+  if (!result.authorized) {
+    throw new Error(result.reason || `FORBIDDEN: Role ${actor.role} may not call ${path}`);
+  }
+  return actor;
+}
+
 // 0. Authentication & Session Lifecycle
 export async function login(email: string, password: string): Promise<ServerActionResponse> {
   try {
     const valid = loginSchema.parse({ email, password });
-    const result = await authService.login({
-      method: "PASSWORD",
-      email: valid.email,
-      password: valid.password,
-    });
-    if (!result) {
+    const headerStore = await headers();
+    const clientIp =
+      (headerStore.get("x-forwarded-for") || "").split(",")[0]?.trim() || undefined;
+
+    const outcome = await authService.login(
+      { method: "PASSWORD", email: valid.email, password: valid.password },
+      clientIp
+    );
+
+    if (outcome.status === "LOCKED") {
+      const mins = Math.max(1, Math.ceil(outcome.retryAfterSeconds / 60));
+      return {
+        success: false,
+        error: `LOCKED: Too many failed attempts. Try again in ${mins} minute(s).`,
+      };
+    }
+    if (outcome.status !== "OK") {
       return { success: false, error: "INVALID_CREDENTIALS: Email or password is incorrect" };
     }
-    await setSessionCookie(result.session.id);
+
+    await setSessionCookie(outcome.session.id);
     return {
       success: true,
       data: {
-        userId: result.user.userId,
-        role: result.user.role,
-        name: result.user.name,
-        email: result.user.email,
+        userId: outcome.user.userId,
+        role: outcome.user.role,
+        name: outcome.user.name,
+        email: outcome.user.email,
       },
     };
   } catch (err: any) {
     return { success: false, error: toClientError(err, "Login failed") };
+  }
+}
+
+// 0b. Account lifecycle: provisioning, password change, reset
+export async function createUser(input: {
+  email: string;
+  name: string;
+  role: string;
+  departmentId?: string;
+  password?: string;
+}): Promise<ServerActionResponse> {
+  try {
+    await authorizeAction("/api/users/create");
+    const valid = createUserSchema.parse(input);
+    const result = await authService.createUserByAdmin(valid as any);
+    return { success: true, data: result };
+  } catch (err: any) {
+    return { success: false, error: toClientError(err, "Failed to create user") };
+  }
+}
+
+export async function listUsers(): Promise<ServerActionResponse> {
+  try {
+    await authorizeAction("/api/users/list");
+    const rows = await db.users.values();
+    const users = rows
+      .map((u) => ({
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        role: u.role,
+        departmentId: u.departmentId ?? null,
+        createdAt:
+          u.createdAt instanceof Date ? u.createdAt.toISOString() : String(u.createdAt ?? ""),
+      }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    // Deliberately omits passwordHash — credential material never leaves the server.
+    return { success: true, data: users };
+  } catch (err: any) {
+    return { success: false, error: toClientError(err, "Failed to load users") };
+  }
+}
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string
+): Promise<ServerActionResponse> {
+  try {
+    const actor = await authorizeAction("/api/self/password");
+    const valid = changePasswordSchema.parse({ currentPassword, newPassword });
+    await authService.changePassword(actor.userId, valid.currentPassword, valid.newPassword);
+    return {
+      success: true,
+      data: { message: "Password updated. All sessions were signed out." },
+    };
+  } catch (err: any) {
+    return { success: false, error: toClientError(err, "Failed to change password") };
+  }
+}
+
+export async function requestPasswordReset(email: string): Promise<ServerActionResponse> {
+  try {
+    const valid = resetRequestSchema.parse({ email });
+    const result = await authService.requestPasswordReset(valid.email);
+
+    // Always report success so the endpoint cannot be used to enumerate accounts.
+    const data: Record<string, unknown> = {
+      message: "If that account exists, a reset link has been sent.",
+    };
+    if (result && process.env.NODE_ENV !== "production") {
+      // Without a configured mail/SMS provider, surface the token in dev only.
+      data.developmentResetToken = result.token;
+    }
+    return { success: true, data };
+  } catch (err: any) {
+    return { success: false, error: toClientError(err, "Failed to request password reset") };
+  }
+}
+
+export async function resetPassword(
+  token: string,
+  newPassword: string
+): Promise<ServerActionResponse> {
+  try {
+    const valid = resetPasswordSchema.parse({ token, newPassword });
+    await authService.resetPassword(valid.token, valid.newPassword);
+    return { success: true, data: { message: "Password reset. You can now sign in." } };
+  } catch (err: any) {
+    return { success: false, error: toClientError(err, "Failed to reset password") };
   }
 }
 
@@ -135,7 +259,7 @@ export async function getCurrentUser(): Promise<ServerActionResponse> {
 // 1. Dashboard Overview Data
 export async function getDashboardData(_role?: string): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/self/dashboard");
     const studentId = actor.userId;
     const profile = (await db.studentProfiles.values()).find((p) => p.userId === studentId || p.id === studentId);
     const totalClasses = await db.courseOfferings.count();
@@ -182,6 +306,7 @@ export async function getDashboardData(_role?: string): Promise<ServerActionResp
 // 2. Course Catalog & Enrollment
 export async function getCourseCatalog(): Promise<ServerActionResponse> {
   try {
+    await authorizeAction("/api/self/catalog");
     const offeringRows = await db.courseOfferings.values();
     const offerings = await Promise.all(offeringRows.map(async (offering) => {
       const course = await db.courses.get(offering.courseId);
@@ -207,7 +332,7 @@ export async function getCourseCatalog(): Promise<ServerActionResponse> {
 
 export async function enrollInCourse(offeringId: string, _studentId?: string): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/courses/register");
     const valid = courseEnrollmentSchema.parse({ offeringId, studentId: actor.userId });
     const result = await courseCheckoutService.checkoutCourses(valid.studentId, [valid.offeringId]);
     return { success: true, data: result };
@@ -223,7 +348,7 @@ export async function markAttendancePunch(payload?: {
   token?: string;
 }): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/attendance/punch");
     const studentId = actor.userId;
     const offering = payload?.offeringId
       ? await db.courseOfferings.get(payload.offeringId)
@@ -257,6 +382,7 @@ export async function markManualAttendance() {
 // 4. Timetable Schedule
 export async function getTimetableMatrix(): Promise<ServerActionResponse> {
   try {
+    await authorizeAction("/api/self/timetable");
     const slotRows = await db.timetableSlots.values();
     const slots = await Promise.all(slotRows.map(async (slot) => {
       const offering = await db.courseOfferings.get(slot.offeringId);
@@ -283,7 +409,7 @@ export async function getTimetableMatrix(): Promise<ServerActionResponse> {
 // 5. Degree Audit & What-If Simulation
 export async function getDegreeAudit(_studentId?: string): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/self/degree-audit");
     const studentId = actor.userId;
     const profile = (await db.studentProfiles.values()).find(
       (p) => p.userId === studentId || p.id === studentId
@@ -316,7 +442,7 @@ export async function getDegreeAudit(_studentId?: string): Promise<ServerActionR
 
 export async function simulateWhatIf(targetProgramId: string, _studentId?: string): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/courses/register");
     const valid = whatIfSimulationSchema.parse({ targetProgramId, studentId: actor.userId });
     const profile = (await db.studentProfiles.values()).find((p) => p.userId === valid.studentId || p.id === valid.studentId);
     if (!profile) return { success: false, error: "Profile not found" };
@@ -341,7 +467,7 @@ export async function simulateWhatIf(targetProgramId: string, _studentId?: strin
 // 6. Fees, Ledger & 48-Hour Provisional Pass
 export async function getFeeTransactions(_studentId?: string): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/fees/ledger");
     const studentId = actor.userId;
     const profile = (await db.studentProfiles.values()).find((p) => p.userId === studentId || p.id === studentId);
     const targetId = profile ? profile.id : studentId;
@@ -363,7 +489,7 @@ export async function getFeeTransactions(_studentId?: string): Promise<ServerAct
 
 export async function payFeeTransaction(transactionId: string, _studentId?: string): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/fees/pay");
     const valid = feePaymentSchema.parse({ transactionId, studentId: actor.userId });
     const allTxs = await db.paymentTransactions.values();
     const tx = allTxs.find((t) => t.id === valid.transactionId || t.orderId === valid.transactionId);
@@ -380,7 +506,7 @@ export async function payFeeTransaction(transactionId: string, _studentId?: stri
 
 export async function requestProvisionalPass(reason: string, _studentId?: string): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/finance/provisional-pass");
     const valid = provisionalPassSchema.parse({ studentId: actor.userId, reason });
     const profile = (await db.studentProfiles.values()).find((p) => p.userId === valid.studentId || p.id === valid.studentId);
     const targetStudentId = profile ? profile.id : valid.studentId;
@@ -401,6 +527,7 @@ export async function requestProvisionalPass(reason: string, _studentId?: string
 // 7. Library Browser & Loans
 export async function getLibraryBooks(): Promise<ServerActionResponse> {
   try {
+    await authorizeAction("/api/self/library");
     const books = (await db.libraryBooks.values()).map((b) => ({
       id: b.id,
       isbn: b.isbn,
@@ -419,7 +546,7 @@ export async function getLibraryBooks(): Promise<ServerActionResponse> {
 
 export async function borrowLibraryBook(bookId: string, _borrowerId?: string): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/library/borrow");
     const valid = libraryActionSchema.parse({ bookId, borrowerId: actor.userId });
     const profile = (await db.studentProfiles.values()).find((p) => p.userId === valid.borrowerId || p.id === valid.borrowerId);
     const targetStudentId = profile ? profile.id : valid.borrowerId;
@@ -434,7 +561,7 @@ export async function borrowLibraryBook(bookId: string, _borrowerId?: string): P
 // 8. Leaves & Grievance Redressal
 export async function getLeaveApplications(_userId?: string): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/leave/apply");
     const userId = actor.userId;
     const leaves = (await db.leaveApplications.values())
       .filter((l) => l.applicantId === userId)
@@ -463,7 +590,7 @@ export async function submitLeave(data: {
   applicantId?: string;
 }): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/leave/apply");
     const valid = leaveApplicationSchema.parse({
       applicantId: actor.userId,
       applicantRole: actor.role === "FACULTY" ? "FACULTY" : "STUDENT",
@@ -505,7 +632,7 @@ export async function submitGrievance(data: {
   description: string;
   isAnonymous?: boolean;  }): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/grievances/file");
     const valid = grievanceSubmissionSchema.parse({
       ...data,
       complainantId: data.isAnonymous ? undefined : actor.userId,
@@ -534,7 +661,7 @@ export async function submitGrievance(data: {
 // 9. Notifications Center
 export async function getNotifications(_userId?: string): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/self/notifications");
     const notifs = await notificationCenter.getInbox(actor.userId);
     return { success: true, data: notifs };
   } catch (err: any) {
@@ -544,7 +671,7 @@ export async function getNotifications(_userId?: string): Promise<ServerActionRe
 
 export async function markNotificationAsRead(id: string, _userId?: string): Promise<ServerActionResponse> {
   try {
-    const actor = await requireActor();
+    const actor = await authorizeAction("/api/self/notifications");
     const notif = await notificationCenter.markAsRead(id, actor.userId);
     return { success: true, data: notif };
   } catch (err: any) {
