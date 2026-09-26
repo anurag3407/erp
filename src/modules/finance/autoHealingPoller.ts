@@ -26,8 +26,9 @@ export class AutoHealingPaymentPoller {
     const now = Date.now();
     const fiveMinutesMs = 5 * 60 * 1000;
 
-    const pendingTransactions = Array.from(db.paymentTransactions.values()).filter(
-      (tx) => tx.status === 'PENDING' && now - tx.createdAt.getTime() >= fiveMinutesMs
+    const allTransactions = await db.paymentTransactions.values();
+    const pendingTransactions = allTransactions.filter(
+      (tx) => tx.status === 'PENDING' && now - new Date(tx.createdAt).getTime() >= fiveMinutesMs
     );
 
     let healedCount = 0;
@@ -63,10 +64,12 @@ export class AutoHealingPaymentPoller {
           });
 
           tx.status = 'RECONCILED_BY_POLLER';
+          await db.paymentTransactions.set(tx.orderId, tx);
           healedCount++;
           healedOrderIds.push(tx.orderId);
         } else if (gatewayResult.status === 'failed') {
           tx.status = 'FAILED';
+          await db.paymentTransactions.set(tx.orderId, tx);
           failedCount++;
         }
       } catch {

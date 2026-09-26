@@ -22,14 +22,14 @@ export class WebAuthnBindingService {
    * Register a student's biometric authenticator
    * Rejects if the physical device credential is already bound to another student
    */
-  registerDevice(
+  async registerDevice(
     studentId: string,
     credentialId: string,
     credentialPublicKey: string,
     deviceModel: string
-  ): { success: boolean; authenticator?: RegisteredAuthenticator; error?: string } {
+  ): Promise<{ success: boolean; authenticator?: RegisteredAuthenticator; error?: string }> {
     // Check if credential is used by another student
-    for (const auth of db.authenticators.values()) {
+    for (const auth of await db.authenticators.values()) {
       if (auth.credentialId === credentialId && auth.studentId !== studentId) {
         return {
           success: false,
@@ -49,7 +49,7 @@ export class WebAuthnBindingService {
       registeredAt: new Date(),
     };
 
-    db.authenticators.set(credentialId, newAuth);
+    await db.authenticators.set(credentialId, newAuth);
 
     return {
       success: true,
@@ -60,13 +60,13 @@ export class WebAuthnBindingService {
   /**
    * Verify biometric assertion during attendance marking
    */
-  verifyBiometricAssertion(
+  async verifyBiometricAssertion(
     studentId: string,
     credentialId: string,
     clientDataJSON: string,
     signature: string
-  ): { verified: boolean; error?: string } {
-    const authenticator = db.authenticators.get(credentialId);
+  ): Promise<{ verified: boolean; error?: string }> {
+    const authenticator = await db.authenticators.get(credentialId);
 
     if (!authenticator) {
       return { verified: false, error: 'NO_BOUND_AUTHENTICATOR: Device not registered for student' };
@@ -88,6 +88,7 @@ export class WebAuthnBindingService {
       }
 
       authenticator.counter += 1;
+      await db.authenticators.set(credentialId, authenticator);
       return { verified: true };
     } catch {
       return { verified: false, error: 'SIGNATURE_VERIFICATION_FAILED' };
@@ -97,8 +98,8 @@ export class WebAuthnBindingService {
   /**
    * Query registered authenticators for a student
    */
-  getStudentAuthenticators(studentId: string): RegisteredAuthenticator[] {
-    return Array.from(db.authenticators.values()).filter((a) => a.studentId === studentId);
+  async getStudentAuthenticators(studentId: string): Promise<RegisteredAuthenticator[]> {
+    return (await db.authenticators.values()).filter((a) => a.studentId === studentId);
   }
 }
 

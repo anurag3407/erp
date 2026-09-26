@@ -21,8 +21,8 @@ export class ProvisionalHallTicketService {
   /**
    * Issue a 48-Hour Provisional Hall Ticket
    */
-  issueProvisionalPass(req: ProvisionalPassRequest): ProvisionalHallTicket {
-    const student = db.studentProfiles.get(req.studentId);
+  async issueProvisionalPass(req: ProvisionalPassRequest): Promise<ProvisionalHallTicket> {
+    const student = await db.studentProfiles.get(req.studentId);
     if (!student) {
       throw new Error(`Student not found: ${req.studentId}`);
     }
@@ -60,7 +60,7 @@ export class ProvisionalHallTicketService {
       }),
     };
 
-    db.provisionalHallTickets.set(passId, ticket);
+    await db.provisionalHallTickets.set(passId, ticket);
 
     return ticket;
   }
@@ -68,8 +68,8 @@ export class ProvisionalHallTicketService {
   /**
    * Validate a provisional hall ticket at the exam gate
    */
-  validatePassAtGate(passId: string): { isValid: boolean; remainingHours: number; message: string } {
-    const ticket = db.provisionalHallTickets.get(passId);
+  async validatePassAtGate(passId: string): Promise<{ isValid: boolean; remainingHours: number; message: string }> {
+    const ticket = await db.provisionalHallTickets.get(passId);
     if (!ticket) {
       return { isValid: false, remainingHours: 0, message: 'Provisional pass not found' };
     }

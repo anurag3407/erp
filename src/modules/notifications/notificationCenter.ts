@@ -40,7 +40,7 @@ export class NotificationCenter {
   /**
    * Send an in-app notification to a user
    */
-  sendNotification(req: SendNotificationRequest): InAppNotification {
+  async sendNotification(req: SendNotificationRequest): Promise<InAppNotification> {
     const notificationId = `notif-${crypto.randomUUID()}`;
     const notification: InAppNotification = {
       id: notificationId,
@@ -55,17 +55,17 @@ export class NotificationCenter {
       createdAt: new Date(),
     };
 
-    db.notifications.set(notificationId, notification);
+    await db.notifications.set(notificationId, notification);
     return notification;
   }
 
-  private getUserIdAliases(userId: string): Set<string> {
+  private async getUserIdAliases(userId: string): Promise<Set<string>> {
     const aliases = new Set<string>([userId]);
-    const studentByProfileId = db.studentProfiles.get(userId);
+    const studentByProfileId = await db.studentProfiles.get(userId);
     if (studentByProfileId) {
       aliases.add(studentByProfileId.userId);
     }
-    for (const p of db.studentProfiles.values()) {
+    for (const p of await db.studentProfiles.values()) {
       if (p.userId === userId) {
         aliases.add(p.id);
       }
@@ -76,15 +76,15 @@ export class NotificationCenter {
   /**
    * Retrieve notification inbox for a user
    */
-  getInbox(userId: string, options?: { unreadOnly?: boolean; limit?: number }): InAppNotification[] {
-    const aliases = this.getUserIdAliases(userId);
-    let userNotifs = Array.from(db.notifications.values()).filter((n) => aliases.has(n.userId));
+  async getInbox(userId: string, options?: { unreadOnly?: boolean; limit?: number }): Promise<InAppNotification[]> {
+    const aliases = await this.getUserIdAliases(userId);
+    let userNotifs = (await db.notifications.values()).filter((n) => aliases.has(n.userId));
 
     if (options?.unreadOnly) {
       userNotifs = userNotifs.filter((n) => !n.isRead);
     }
 
-    userNotifs.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    userNotifs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     if (options?.limit && options.limit > 0) {
       userNotifs = userNotifs.slice(0, options.limit);
@@ -96,40 +96,42 @@ export class NotificationCenter {
   /**
    * Get unread count
    */
-  getUnreadCount(userId: string): number {
-    const aliases = this.getUserIdAliases(userId);
-    return Array.from(db.notifications.values()).filter((n) => aliases.has(n.userId) && !n.isRead).length;
+  async getUnreadCount(userId: string): Promise<number> {
+    const aliases = await this.getUserIdAliases(userId);
+    return (await db.notifications.values()).filter((n) => aliases.has(n.userId) && !n.isRead).length;
   }
 
   /**
    * Mark single notification as read
    */
-  markAsRead(notificationId: string, userId: string): InAppNotification {
-    const notif = db.notifications.get(notificationId);
+  async markAsRead(notificationId: string, userId: string): Promise<InAppNotification> {
+    const notif = await db.notifications.get(notificationId);
     if (!notif) {
       throw new Error(`Notification not found: ${notificationId}`);
     }
 
-    const aliases = this.getUserIdAliases(userId);
+    const aliases = await this.getUserIdAliases(userId);
     if (!aliases.has(notif.userId)) {
       throw new Error('UNAUTHORIZED: Cannot mark another user\'s notification as read');
     }
 
     notif.isRead = true;
     notif.readAt = new Date();
+    await db.notifications.set(notif.id, notif);
     return notif;
   }
 
   /**
    * Mark all notifications as read for a user
    */
-  markAllAsRead(userId: string): number {
-    const aliases = this.getUserIdAliases(userId);
+  async markAllAsRead(userId: string): Promise<number> {
+    const aliases = await this.getUserIdAliases(userId);
     let count = 0;
-    for (const notif of db.notifications.values()) {
+    for (const notif of await db.notifications.values()) {
       if (aliases.has(notif.userId) && !notif.isRead) {
         notif.isRead = true;
         notif.readAt = new Date();
+        await db.notifications.set(notif.id, notif);
         count++;
       }
     }
@@ -162,7 +164,7 @@ export class NotificationCenter {
   /**
    * Register or update a browser Web Push subscription
    */
-  registerPushSubscription(req: RegisterPushSubscriptionRequest): WebPushSubscription {
+  async registerPushSubscription(req: RegisterPushSubscriptionRequest): Promise<WebPushSubscription> {
     const subId = `sub-${crypto.randomUUID()}`;
     const subscription: WebPushSubscription = {
       id: subId,
@@ -174,7 +176,7 @@ export class NotificationCenter {
       createdAt: new Date(),
     };
 
-    db.pushSubscriptions.set(req.endpoint, subscription);
+    await db.pushSubscriptions.set(req.endpoint, subscription);
     return subscription;
   }
 
@@ -199,18 +201,18 @@ export class NotificationCenter {
   /**
    * Broadcast multi-channel notifications to targeted cohorts
    */
-  broadcastToCohort(
+  async broadcastToCohort(
     target: CohortBroadcastTarget,
     notification: BroadcastNotificationRequest
-  ): { recipientCount: number; notificationsCreated: number; pushNotificationsDispatched: number } {
+  ): Promise<{ recipientCount: number; notificationsCreated: number; pushNotificationsDispatched: number }> {
     let targetUserIds = new Set<string>();
 
     if (target.all) {
-      for (const u of db.users.values()) {
+      for (const u of await db.users.values()) {
         targetUserIds.add(u.id);
       }
     } else {
-      let candidates = Array.from(db.users.values());
+      let candidates = await db.users.values();
 
       if (target.role) {
         candidates = candidates.filter((u) => u.role === target.role);
@@ -222,7 +224,7 @@ export class NotificationCenter {
 
       if (target.programId) {
         const studentUserIdsInProg = new Set(
-          Array.from(db.studentProfiles.values())
+          (await db.studentProfiles.values())
             .filter((p) => p.programId === target.programId)
             .map((p) => p.userId)
         );
@@ -231,9 +233,9 @@ export class NotificationCenter {
 
       if (target.offeringId) {
         const studentUserIdsInOffering = new Set<string>();
-        for (const enr of db.enrollments.values()) {
+        for (const enr of await db.enrollments.values()) {
           if (enr.offeringId === target.offeringId) {
-            const profile = db.studentProfiles.get(enr.studentId);
+            const profile = await db.studentProfiles.get(enr.studentId);
             if (profile) {
               studentUserIdsInOffering.add(profile.userId);
             }
@@ -248,7 +250,7 @@ export class NotificationCenter {
 
       // If targeting students specifically, also support any profile IDs directly associated
       if (target.role === 'STUDENT') {
-        for (const p of db.studentProfiles.values()) {
+        for (const p of await db.studentProfiles.values()) {
           targetUserIds.add(p.userId);
         }
       }
@@ -259,7 +261,7 @@ export class NotificationCenter {
 
     for (const userId of targetUserIds) {
       // 1. In-app notification
-      this.sendNotification({
+      await this.sendNotification({
         userId,
         title: notification.title,
         body: notification.body,
@@ -271,8 +273,9 @@ export class NotificationCenter {
       notificationsCreated++;
 
       // 2. Web Push matching userId or any alias
-      const aliases = this.getUserIdAliases(userId);
-      const userSubscriptions = Array.from(db.pushSubscriptions.values()).filter(
+      const aliases = await this.getUserIdAliases(userId);
+      const allSubs = await db.pushSubscriptions.values();
+      const userSubscriptions = allSubs.filter(
         (s) => aliases.has(s.userId)
       );
       for (const sub of userSubscriptions) {

@@ -75,7 +75,7 @@ export class DigiLockerSyncService {
   async pushToDigiLocker(record: DigiLockerCreditRecord): Promise<{ success: boolean; ackId: string }> {
     const ackId = `NAD-${crypto.randomUUID()}`;
     for (const c of record.courses) {
-      db.abcRecords.set(`${record.apaarId}-${c.courseCode}`, {
+      await db.abcRecords.set(`${record.apaarId}-${c.courseCode}`, {
         id: `abc-${crypto.randomUUID()}`,
         studentId: record.studentRollNumber,
         apaarId: record.apaarId,

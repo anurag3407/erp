@@ -28,7 +28,7 @@ export class GradeSyncWorker {
    * Ingest grade batch from LMS Assignment and Grade Services (AGS)
    * Preserves manual grades when is_manual_override is true
    */
-  syncLmsScores(scores: AgsScorePayload[]): GradeSyncResult {
+  async syncLmsScores(scores: AgsScorePayload[]): Promise<GradeSyncResult> {
     const records: Array<{
       studentId: string;
       offeringId: string;
@@ -46,7 +46,7 @@ export class GradeSyncWorker {
       }
 
       // Check if faculty has a manual grade override for this student and offering
-      const isManualOverridden = facultyGradebookService.isGradeOverridden(
+      const isManualOverridden = await facultyGradebookService.isGradeOverridden(
         score.offeringId,
         score.studentId,
         score.activityId

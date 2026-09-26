@@ -75,7 +75,7 @@ export class WebhookIdempotencyService {
       }
 
       // Update database transaction status
-      let transaction = db.paymentTransactions.get(orderId);
+      let transaction = await db.paymentTransactions.get(orderId);
       if (!transaction) {
         // Fallback create record if missing
         transaction = {
@@ -92,12 +92,13 @@ export class WebhookIdempotencyService {
           createdAt: new Date(),
           updatedAt: new Date(),
         };
-        db.paymentTransactions.set(orderId, transaction);
+        await db.paymentTransactions.set(orderId, transaction);
       } else {
         transaction.status = payload.event === 'payment.captured' ? 'CAPTURED' : 'FAILED';
         transaction.paymentId = paymentId;
         transaction.utrReferenceNumber = utrReferenceNumber;
         transaction.updatedAt = new Date();
+        await db.paymentTransactions.set(orderId, transaction);
       }
 
       // Mark idempotency key as permanently finalized in Redis (30-day retention)

@@ -34,12 +34,12 @@ export class LeaveService {
    * Apply for student leave (Casual, Medical, or On-Duty)
    * Automatically routes to mentor for first-level review
    */
-  applyStudentLeave(req: ApplyStudentLeaveRequest): LeaveApplication {
+  async applyStudentLeave(req: ApplyStudentLeaveRequest): Promise<LeaveApplication> {
     if (new Date(req.startDate) > new Date(req.endDate)) {
       throw new Error('INVALID_DATES: Leave start date must precede or equal end date');
     }
 
-    const student = db.studentProfiles.get(req.studentId);
+    const student = await db.studentProfiles.get(req.studentId);
     if (!student) {
       throw new Error(`Student not found: ${req.studentId}`);
     }
@@ -62,7 +62,7 @@ export class LeaveService {
       updatedAt: new Date(),
     };
 
-    db.leaveApplications.set(leaveId, application);
+    await db.leaveApplications.set(leaveId, application);
     return application;
   }
 
@@ -70,17 +70,17 @@ export class LeaveService {
    * Apply for faculty leave with substitute faculty assignment.
    * Performs timetable conflict check via validateTemporalExclusion.
    */
-  applyFacultyLeave(req: ApplyFacultyLeaveRequest): LeaveApplication {
+  async applyFacultyLeave(req: ApplyFacultyLeaveRequest): Promise<LeaveApplication> {
     if (new Date(req.startDate) > new Date(req.endDate)) {
       throw new Error('INVALID_DATES: Leave start date must precede or equal end date');
     }
 
-    const faculty = db.users.get(req.facultyId);
+    const faculty = await db.users.get(req.facultyId);
     if (!faculty || faculty.role !== 'FACULTY') {
       throw new Error(`Valid faculty not found: ${req.facultyId}`);
     }
 
-    const substitute = db.users.get(req.substituteFacultyId);
+    const substitute = await db.users.get(req.substituteFacultyId);
     if (!substitute || substitute.role !== 'FACULTY') {
       throw new Error(`Valid substitute faculty not found: ${req.substituteFacultyId}`);
     }
@@ -93,7 +93,8 @@ export class LeaveService {
     const reqEnd = new Date(req.endDate).getTime();
 
     // 1. Check if substitute faculty is already on leave during overlapping dates
-    for (const otherApp of db.leaveApplications.values()) {
+    const existingApplications = await db.leaveApplications.values();
+    for (const otherApp of existingApplications) {
       if (
         otherApp.applicantId === req.substituteFacultyId &&
         otherApp.applicantType === 'FACULTY' &&
@@ -110,10 +111,11 @@ export class LeaveService {
     }
 
     // 2. Timetable Conflict Check via validateTemporalExclusion against permanent slots
-    const facultySlots = Array.from(db.timetableSlots.values()).filter(
+    const allSlots = await db.timetableSlots.values();
+    const facultySlots = allSlots.filter(
       (slot) => slot.facultyId === req.facultyId
     );
-    const substituteSlots = Array.from(db.timetableSlots.values()).filter(
+    const substituteSlots = allSlots.filter(
       (slot) => slot.facultyId === req.substituteFacultyId
     );
 
@@ -134,7 +136,7 @@ export class LeaveService {
     }
 
     // 3. Check if substitute is already assigned to another faculty's overlapping leave with colliding slots
-    for (const otherApp of db.leaveApplications.values()) {
+    for (const otherApp of existingApplications) {
       if (
         otherApp.substituteFacultyId === req.substituteFacultyId &&
         otherApp.applicantId !== req.facultyId &&
@@ -143,7 +145,7 @@ export class LeaveService {
         const oStart = new Date(otherApp.startDate).getTime();
         const oEnd = new Date(otherApp.endDate).getTime();
         if (Math.max(reqStart, oStart) <= Math.min(reqEnd, oEnd)) {
-          const otherFacultySlots = Array.from(db.timetableSlots.values()).filter(
+          const otherFacultySlots = allSlots.filter(
             (slot) => slot.facultyId === otherApp.applicantId
           );
           for (const slot of facultySlots) {
@@ -180,15 +182,15 @@ export class LeaveService {
       updatedAt: new Date(),
     };
 
-    db.leaveApplications.set(leaveId, application);
+    await db.leaveApplications.set(leaveId, application);
     return application;
   }
 
   /**
    * Mentor review step for student leave
    */
-  approveByMentor(leaveId: string, mentorUserId: string, comments?: string): LeaveApplication {
-    const app = db.leaveApplications.get(leaveId);
+  async approveByMentor(leaveId: string, mentorUserId: string, comments?: string): Promise<LeaveApplication> {
+    const app = await db.leaveApplications.get(leaveId);
     if (!app) {
       throw new Error(`Leave application not found: ${leaveId}`);
     }
@@ -201,6 +203,7 @@ export class LeaveService {
     app.mentorApprovedAt = new Date();
     app.status = 'PENDING_HOD';
     app.updatedAt = new Date();
+    await db.leaveApplications.set(app.id, app);
 
     return app;
   }
@@ -209,8 +212,8 @@ export class LeaveService {
    * HOD final approval step
    * If leave is On-Duty (OD), automatically generates On-Duty Pass
    */
-  approveByHod(leaveId: string, hodUserId: string): { application: LeaveApplication; onDutyPass?: OnDutyPass } {
-    const app = db.leaveApplications.get(leaveId);
+  async approveByHod(leaveId: string, hodUserId: string): Promise<{ application: LeaveApplication; onDutyPass?: OnDutyPass }> {
+    const app = await db.leaveApplications.get(leaveId);
     if (!app) {
       throw new Error(`Leave application not found: ${leaveId}`);
     }
@@ -242,17 +245,18 @@ export class LeaveService {
         issuedAt: new Date(),
       };
 
-      db.onDutyPasses.set(passNumber, onDutyPass);
+      await db.onDutyPasses.set(passNumber, onDutyPass);
     }
 
+    await db.leaveApplications.set(app.id, app);
     return { application: app, onDutyPass };
   }
 
   /**
    * Reject leave application
    */
-  rejectLeave(leaveId: string, rejectionReason: string): LeaveApplication {
-    const app = db.leaveApplications.get(leaveId);
+  async rejectLeave(leaveId: string, rejectionReason: string): Promise<LeaveApplication> {
+    const app = await db.leaveApplications.get(leaveId);
     if (!app) {
       throw new Error(`Leave application not found: ${leaveId}`);
     }
@@ -260,6 +264,7 @@ export class LeaveService {
     app.status = 'REJECTED';
     app.rejectionReason = rejectionReason;
     app.updatedAt = new Date();
+    await db.leaveApplications.set(app.id, app);
 
     return app;
   }
@@ -268,12 +273,12 @@ export class LeaveService {
    * Cancel an existing leave application (student or faculty).
    * Revokes any generated On-Duty pass and frees up substitute faculty.
    */
-  cancelLeave(
+  async cancelLeave(
     leaveId: string,
     cancelledByUserId: string,
     reason?: string
-  ): { application: LeaveApplication; revokedOnDutyPass?: OnDutyPass } {
-    const app = db.leaveApplications.get(leaveId);
+  ): Promise<{ application: LeaveApplication; revokedOnDutyPass?: OnDutyPass }> {
+    const app = await db.leaveApplications.get(leaveId);
     if (!app) {
       throw new Error(`Leave application not found: ${leaveId}`);
     }
@@ -292,21 +297,23 @@ export class LeaveService {
 
     let revokedPass: OnDutyPass | undefined;
     if (app.onDutyPassNumber) {
-      const pass = db.onDutyPasses.get(app.onDutyPassNumber);
+      const pass = await db.onDutyPasses.get(app.onDutyPassNumber);
       if (pass) {
         pass.isVerified = false;
+        await db.onDutyPasses.set(pass.passNumber, pass);
         revokedPass = pass;
       }
     }
 
+    await db.leaveApplications.set(app.id, app);
     return { application: app, revokedOnDutyPass: revokedPass };
   }
 
   /**
    * Verify an On-Duty Pass at event gate or academic verification desk
    */
-  verifyOnDutyPass(passNumber: string): { isValid: boolean; pass?: OnDutyPass; message: string } {
-    const pass = db.onDutyPasses.get(passNumber);
+  async verifyOnDutyPass(passNumber: string): Promise<{ isValid: boolean; pass?: OnDutyPass; message: string }> {
+    const pass = await db.onDutyPasses.get(passNumber);
     if (!pass) {
       return { isValid: false, message: 'On-Duty pass not found' };
     }
@@ -321,8 +328,8 @@ export class LeaveService {
   /**
    * Query leaves for a student
    */
-  getStudentLeaves(studentId: string): LeaveApplication[] {
-    return Array.from(db.leaveApplications.values()).filter(
+  async getStudentLeaves(studentId: string): Promise<LeaveApplication[]> {
+    return (await db.leaveApplications.values()).filter(
       (l) => l.applicantId === studentId && l.applicantType === 'STUDENT'
     );
   }
@@ -330,8 +337,8 @@ export class LeaveService {
   /**
    * Query leaves for a faculty member
    */
-  getFacultyLeaves(facultyId: string): LeaveApplication[] {
-    return Array.from(db.leaveApplications.values()).filter(
+  async getFacultyLeaves(facultyId: string): Promise<LeaveApplication[]> {
+    return (await db.leaveApplications.values()).filter(
       (l) => l.applicantId === facultyId && l.applicantType === 'FACULTY'
     );
   }

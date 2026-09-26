@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { db } from '../../lib/db.js';
+import { sql } from '../../db/client.js';
 import { seatEngine } from './seatEngine.js';
 
 /**
@@ -33,24 +34,14 @@ export class CourseCheckoutService {
     const enrolled: string[] = [];
     const failed: Array<{ offeringId: string; reason: string }> = [];
 
+    // Lazily load enrollments only once a reservation succeeds — this keeps the
+    // hot rejection path (course full) entirely in Redis with zero DB round-trips.
+    let existingEnrollments: Awaited<ReturnType<typeof db.enrollments.values>> | null = null;
+
     try {
       for (const offeringId of sortedOfferingIds) {
-        const offering = db.courseOfferings.get(offeringId);
-        if (!offering) {
-          failed.push({ offeringId, reason: 'Course offering not found' });
-          continue;
-        }
-
-        // Check if student already enrolled
-        const alreadyEnrolled = Array.from(db.enrollments.values()).some(
-          (e) => e.studentId === studentId && e.offeringId === offeringId
-        );
-        if (alreadyEnrolled) {
-          failed.push({ offeringId, reason: 'Student already enrolled in this course' });
-          continue;
-        }
-
-        // Verify Redis Cart Hold or Atomically Reserve
+        // 1. Gate on the atomic Redis seat reservation FIRST (fast rejection).
+        //    Only requests that actually win a seat touch the database.
         const hasHold = await seatEngine.hasActiveReservation(offeringId, studentId);
         if (!hasHold) {
           const reserved = await seatEngine.reserveSeat(offeringId, studentId);
@@ -60,17 +51,43 @@ export class CourseCheckoutService {
           }
         }
 
-        // Database atomic check-and-increment
-        // Simulates: UPDATE course_offerings SET enrolled_count = enrolled_count + 1 WHERE id = $1 AND enrolled_count < max_capacity
-        if (offering.enrolledCount >= offering.maxCapacity) {
+        // 2. Now the (rare) DB-backed validations run for reservation winners.
+        const offering = await db.courseOfferings.get(offeringId);
+        if (!offering) {
+          await seatEngine.releaseReservation(offeringId, studentId);
+          failed.push({ offeringId, reason: 'Course offering not found' });
+          continue;
+        }
+
+        if (!existingEnrollments) {
+          existingEnrollments = await db.enrollments.values();
+        }
+        const alreadyEnrolled = existingEnrollments.some(
+          (e) => e.studentId === studentId && e.offeringId === offeringId
+        );
+        if (alreadyEnrolled) {
+          await seatEngine.releaseReservation(offeringId, studentId);
+          failed.push({ offeringId, reason: 'Student already enrolled in this course' });
+          continue;
+        }
+
+        // Atomic check-and-increment at the database level:
+        // UPDATE course_offerings SET enrolled_count = enrolled_count + 1
+        // WHERE id = $1 AND enrolled_count < max_capacity
+        const updated = await sql<{ enrolled_count: number }[]>`
+          update course_offerings
+             set enrolled_count = enrolled_count + 1
+           where id = ${offeringId} and enrolled_count < max_capacity
+           returning enrolled_count
+        `;
+        if (updated.length === 0) {
           await seatEngine.releaseReservation(offeringId, studentId);
           failed.push({ offeringId, reason: 'Capacity exceeded at database commit' });
           continue;
         }
 
-        offering.enrolledCount += 1;
         const enrollmentId = `enr-${crypto.randomUUID()}`;
-        db.enrollments.set(enrollmentId, {
+        await db.enrollments.set(enrollmentId, {
           id: enrollmentId,
           studentId,
           offeringId,

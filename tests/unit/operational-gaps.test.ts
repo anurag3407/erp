@@ -41,7 +41,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   const hodId = 'usr-hod-01';
 
   // 1.1 Student Regular Casual Leave Routing
-  const studentLeave = leaveService.applyStudentLeave({
+  const studentLeave = await leaveService.applyStudentLeave({
     studentId,
     leaveType: 'CASUAL',
     startDate: '2025-10-10',
@@ -50,14 +50,14 @@ export async function runOperationalGapsTests(): Promise<void> {
   });
   assert.strictEqual(studentLeave.status, 'PENDING_MENTOR', 'Student leave must route to mentor');
 
-  const mentorApproved = leaveService.approveByMentor(studentLeave.id, mentorId, 'Recommended by mentor');
+  const mentorApproved = await leaveService.approveByMentor(studentLeave.id, mentorId, 'Recommended by mentor');
   assert.strictEqual(mentorApproved.status, 'PENDING_HOD', 'Approved student leave must route to HOD');
 
-  const hodApproved = leaveService.approveByHod(studentLeave.id, hodId);
+  const hodApproved = await leaveService.approveByHod(studentLeave.id, hodId);
   assert.strictEqual(hodApproved.application.status, 'APPROVED', 'HOD must finalize approval');
 
   // 1.2 Student On-Duty (OD) Pass Generation
-  const odLeave = leaveService.applyStudentLeave({
+  const odLeave = await leaveService.applyStudentLeave({
     studentId,
     leaveType: 'ON_DUTY',
     startDate: '2025-11-01',
@@ -66,14 +66,14 @@ export async function runOperationalGapsTests(): Promise<void> {
     isOnDuty: true,
     onDutyEventName: 'Smart India Hackathon 2025',
   });
-  leaveService.approveByMentor(odLeave.id, mentorId);
-  const odHodResult = leaveService.approveByHod(odLeave.id, hodId);
+  await leaveService.approveByMentor(odLeave.id, mentorId);
+  const odHodResult = await leaveService.approveByHod(odLeave.id, hodId);
   assert.strictEqual(odHodResult.application.status, 'APPROVED');
   assert.ok(odHodResult.onDutyPass, 'On-Duty pass must be generated on approval');
   assert.ok(odHodResult.onDutyPass?.passNumber.startsWith('OD-'), 'Pass number format must start with OD-');
 
   // Verify OD pass at gate
-  const passCheck = leaveService.verifyOnDutyPass(odHodResult.onDutyPass.passNumber);
+  const passCheck = await leaveService.verifyOnDutyPass(odHodResult.onDutyPass!.passNumber);
   assert.strictEqual(passCheck.isValid, true, 'On-duty pass must verify as valid');
   assert.strictEqual(passCheck.pass?.eventName, 'Smart India Hackathon 2025');
 
@@ -88,7 +88,7 @@ export async function runOperationalGapsTests(): Promise<void> {
     endTime: '10:00',
     facultyId: faculty1Id,
   };
-  db.timetableSlots.set(slotFac1.id, slotFac1);
+  await db.timetableSlots.set(slotFac1.id, slotFac1);
 
   // Set up colliding slot for substitute faculty 2: Day 1 (Mon) 09:30 - 10:30 (overlap!)
   const slotFac2Overlap: TimetableSlot = {
@@ -100,12 +100,12 @@ export async function runOperationalGapsTests(): Promise<void> {
     endTime: '10:30',
     facultyId: faculty2Id,
   };
-  db.timetableSlots.set(slotFac2Overlap.id, slotFac2Overlap);
+  await db.timetableSlots.set(slotFac2Overlap.id, slotFac2Overlap);
 
   // Attempt faculty 1 leave nominating substitute faculty 2 -> MUST REJECT due to clash
-  assert.throws(
-    () => {
-      leaveService.applyFacultyLeave({
+  await assert.rejects(
+    async () => {
+      await leaveService.applyFacultyLeave({
         facultyId: faculty1Id,
         leaveType: 'CASUAL',
         startDate: '2025-10-15',
@@ -121,9 +121,10 @@ export async function runOperationalGapsTests(): Promise<void> {
   // Clear collision: move substitute slot to non-overlapping time 11:00 - 12:00
   slotFac2Overlap.startTime = '11:00';
   slotFac2Overlap.endTime = '12:00';
+  await db.timetableSlots.set(slotFac2Overlap.id, slotFac2Overlap);
 
   // Re-attempt faculty leave -> MUST SUCCEED
-  const facLeaveSuccess = leaveService.applyFacultyLeave({
+  const facLeaveSuccess = await leaveService.applyFacultyLeave({
     facultyId: faculty1Id,
     leaveType: 'CASUAL',
     startDate: '2025-10-15',
@@ -142,7 +143,7 @@ export async function runOperationalGapsTests(): Promise<void> {
 
   // Create test attendance record
   const attRecordId = 'att-test-override-01';
-  db.attendanceRecords.set(attRecordId, {
+  await db.attendanceRecords.set(attRecordId, {
     id: attRecordId,
     studentId,
     offeringId: 'offering-cs301-s1',
@@ -152,7 +153,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   });
 
   // 2.1 Teacher/HOD Manual Override with Reason Code
-  const overrideRes = attendanceOverrideService.overrideAttendance({
+  const overrideRes = await attendanceOverrideService.overrideAttendance({
     attendanceRecordId: attRecordId,
     newStatus: 'PRESENT',
     reasonCode: 'TEACHER_ERROR',
@@ -166,14 +167,14 @@ export async function runOperationalGapsTests(): Promise<void> {
   assert.strictEqual(overrideRes.auditLog.reasonCode, 'TEACHER_ERROR');
 
   // 2.2 Verify Immutable Audit Log
-  const history = attendanceOverrideService.getAuditHistory(attRecordId);
+  const history = await attendanceOverrideService.getAuditHistory(attRecordId);
   assert.strictEqual(history.length, 1);
   assert.strictEqual(history[0].modifiedByUserId, faculty1Id);
 
   // 2.3 Role Authorization: Student cannot override attendance
-  assert.throws(
-    () => {
-      attendanceOverrideService.overrideAttendance({
+  await assert.rejects(
+    async () => {
+      await attendanceOverrideService.overrideAttendance({
         attendanceRecordId: attRecordId,
         newStatus: 'PRESENT',
         reasonCode: 'GEOFENCE_GPS_DRIFT',
@@ -188,14 +189,16 @@ export async function runOperationalGapsTests(): Promise<void> {
 
   // 2.4 Apply Approved Leave Integration to Attendance
   // Reset record to ABSENT
-  db.attendanceRecords.get(attRecordId)!.status = 'ABSENT';
-  const autoLeaveRes = attendanceOverrideService.applyApprovedLeaveOverride(
+  const attRec = (await db.attendanceRecords.get(attRecordId))!;
+  attRec.status = 'ABSENT';
+  await db.attendanceRecords.set(attRecordId, attRec);
+  const autoLeaveRes = await attendanceOverrideService.applyApprovedLeaveOverride(
     odHodResult.application.id,
     hodId,
     'HOD'
   );
   assert.strictEqual(autoLeaveRes.processedCount, 1, 'Approved OD leave must auto-override attendance');
-  assert.strictEqual(db.attendanceRecords.get(attRecordId)!.status, 'PRESENT');
+  assert.strictEqual((await db.attendanceRecords.get(attRecordId))!.status, 'PRESENT');
   assert.strictEqual(autoLeaveRes.auditLogs[0].reasonCode, 'ON_DUTY_APPROVED');
   console.log('  ✓ Gap 2: Attendance Overrides, Reason Codes & Leave Integration Passed');
 
@@ -205,7 +208,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   console.log('Test 3.3: Course Feedback (5-point Likert) & Statutory Grievances (SLA Tracking)');
 
   // 3.1 5-point Likert Surveys feeding NAAC Metric 1.4
-  const { survey, questions } = feedbackService.createSurvey({
+  const { survey, questions } = await feedbackService.createSurvey({
     offeringId: 'offering-cs301-s1',
     courseId: 'crs-cse-301',
     academicYear: '2025-2026',
@@ -221,7 +224,7 @@ export async function runOperationalGapsTests(): Promise<void> {
 
   // Submit valid responses
   for (let i = 1; i <= 15; i++) {
-    feedbackService.submitResponse({
+    await feedbackService.submitResponse({
       surveyId: survey.id,
       respondentId: `student-${i}`,
       ratings: {
@@ -234,9 +237,9 @@ export async function runOperationalGapsTests(): Promise<void> {
   }
 
   // Reject invalid Likert rating (outside 1-5)
-  assert.throws(
-    () => {
-      feedbackService.submitResponse({
+  await assert.rejects(
+    async () => {
+      await feedbackService.submitResponse({
         surveyId: survey.id,
         respondentId: 'student-bad-rating',
         ratings: {
@@ -249,15 +252,15 @@ export async function runOperationalGapsTests(): Promise<void> {
   );
 
   // Compute NAAC Metric 1.4 Report
-  const naacReport = feedbackService.computeNaacMetric14('2025-2026');
+  const naacReport = await feedbackService.computeNaacMetric14('2025-2026');
   assert.strictEqual(naacReport.totalResponses, 15);
   assert.ok(naacReport.averageLikertScore >= 4.0, 'Average score must be >= 4.0');
   assert.strictEqual(naacReport.naacMetric1_4_Compliant, true);
-  assert.ok(db.naacCache.has('naac-1.4-2025-2026'), 'Metric 1.4 must be cached in naacTelemetryCache');
+  assert.ok(await db.naacCache.has('naac-1.4-2025-2026'), 'Metric 1.4 must be cached in naacTelemetryCache');
 
   // 3.2 Statutory Grievances (Anti-Ragging, POSH, Academic)
   // Anti-Ragging (Strict 24h SLA)
-  const raggingTicket = grievanceService.fileGrievance({
+  const raggingTicket = await grievanceService.fileGrievance({
     complainantId: 'usr-stu-01',
     category: 'ANTI_RAGGING',
     title: 'Intimidation incident in Hostel Block B',
@@ -268,7 +271,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   assert.strictEqual(raggingSlaHours, 24, 'Anti-Ragging SLA must strictly be 24 hours');
 
   // POSH Grievance with Anonymous Flag
-  const poshTicket = grievanceService.fileGrievance({
+  const poshTicket = await grievanceService.fileGrievance({
     isAnonymous: true,
     category: 'POSH',
     title: 'Workplace harassment complaint',
@@ -281,15 +284,15 @@ export async function runOperationalGapsTests(): Promise<void> {
 
   // Simulate SLA breach check
   const futureTime = new Date(Date.now() + 30 * 3600 * 1000); // 30h later (Anti-Ragging 24h breached!)
-  const breachCheck = grievanceService.checkSlaBreaches(futureTime);
+  const breachCheck = await grievanceService.checkSlaBreaches(futureTime);
   assert.ok(breachCheck.breachedCount >= 1, 'Unresolved Anti-ragging ticket at 30h must breach 24h SLA');
-  assert.strictEqual(raggingTicket.isSlaBreached, true);
+  assert.strictEqual((await db.grievanceTickets.get(raggingTicket.id))!.isSlaBreached, true);
 
   // Resolve Ticket
-  grievanceService.resolveGrievance(raggingTicket.id, 'usr-warden-01', 'Perpetrators identified and disciplined');
-  assert.strictEqual(raggingTicket.status, 'RESOLVED');
+  await grievanceService.resolveGrievance(raggingTicket.id, 'usr-warden-01', 'Perpetrators identified and disciplined');
+  assert.strictEqual((await db.grievanceTickets.get(raggingTicket.id))!.status, 'RESOLVED');
 
-  const grvStats = grievanceService.getGrievanceStats();
+  const grvStats = await grievanceService.getGrievanceStats();
   assert.ok(grvStats.totalTickets >= 2);
   assert.ok(grvStats.resolvedTickets >= 1);
   console.log('  ✓ Gap 3: Course Feedback Likert 1.4 & Statutory Grievance SLAs Passed');
@@ -300,7 +303,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   console.log('Test 3.4: Library Catalog, Circulation, Overdue Fines & Provisional Pass Gate');
 
   // 4.1 Catalog & Availability
-  const book = libraryService.addBook({
+  const book = await libraryService.addBook({
     isbn: '978-0262033848',
     title: 'Introduction to Algorithms (CLRS)',
     author: 'Cormen, Leiserson, Rivest, Stein',
@@ -311,20 +314,20 @@ export async function runOperationalGapsTests(): Promise<void> {
   assert.strictEqual(book.availableCopies, 2);
 
   // 4.2 Issue Book
-  const loan1 = libraryService.issueBook(book.id, studentId, 14);
+  const loan1 = await libraryService.issueBook(book.id, studentId, 14);
   assert.strictEqual(loan1.status, 'ISSUED');
-  assert.strictEqual(book.availableCopies, 1);
+  assert.strictEqual((await db.libraryBooks.get(book.id))!.availableCopies, 1);
 
   // 4.3 Renew Book
-  const renewedLoan = libraryService.renewBook(loan1.id, 7);
+  const renewedLoan = await libraryService.renewBook(loan1.id, 7);
   assert.strictEqual(renewedLoan.renewalCount, 1);
 
   // 4.4 Return Book Overdue -> Calculates Fine and Creates Payment Transaction
   // Simulate returning 6 days late (due date was 6 days ago)
-  const lateReturnDate = new Date(loan1.dueDate.getTime() + 6 * 86400000);
-  const { loan: returnedLoan, fineTransaction } = libraryService.returnBook(loan1.id, lateReturnDate);
+  const lateReturnDate = new Date(new Date(renewedLoan.dueDate).getTime() + 6 * 86400000);
+  const { loan: returnedLoan, fineTransaction } = await libraryService.returnBook(loan1.id, lateReturnDate);
   assert.strictEqual(returnedLoan.status, 'RETURNED');
-  assert.strictEqual(book.availableCopies, 2, 'Available copies restored on return');
+  assert.strictEqual((await db.libraryBooks.get(book.id))!.availableCopies, 2, 'Available copies restored on return');
   assert.strictEqual(returnedLoan.overdueFineAmount, 30.0, '6 days overdue at ₹5/day = ₹30');
   assert.ok(fineTransaction, 'Fine transaction must be created');
   assert.strictEqual(fineTransaction?.amount, 30.0);
@@ -333,13 +336,13 @@ export async function runOperationalGapsTests(): Promise<void> {
   assert.strictEqual(fineTransaction?.status, 'PENDING');
 
   // 4.5 Hall Ticket Clearance Gate
-  const clearance = libraryService.checkHallTicketClearance(studentId);
+  const clearance = await libraryService.checkHallTicketClearance(studentId);
   assert.strictEqual(clearance.cleared, false, 'Student with pending library fine must not be cleared');
   assert.strictEqual(clearance.pendingFineAmount, 30.0);
   assert.strictEqual(clearance.provisionalPassEligible, true);
 
   // 4.6 Emergency 48-Hour Provisional Pass Issuance for Library Fine Hold
-  const provPass = libraryService.issueProvisionalPassForLibraryHold(studentId, 'exam-midsem-01', 'usr-admin-01');
+  const provPass = await libraryService.issueProvisionalPassForLibraryHold(studentId, 'exam-midsem-01', 'usr-admin-01');
   assert.ok(provPass.id.startsWith('pht-'), 'Provisional hall ticket must be issued');
   assert.strictEqual(provPass.isReconciled, false);
   console.log('  ✓ Gap 4: Library Circulation, Fines & 48h Provisional Pass Gate Passed');
@@ -350,7 +353,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   console.log('Test 3.5: Direct CIA Gradebook & Manual Override Protection Against LTI Sync');
 
   const offeringId = 'offering-cia-test-s1';
-  db.courseOfferings.set(offeringId, {
+  await db.courseOfferings.set(offeringId, {
     id: offeringId,
     courseId: 'crs-cse-301',
     semester: 4,
@@ -363,7 +366,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   });
 
   // 5.1 Faculty Spreadsheet Marks Entry with isManualOverride = true
-  const gradeEntry = facultyGradebookService.saveGradeEntry({
+  const gradeEntry = await facultyGradebookService.saveGradeEntry({
     offeringId,
     studentId,
     component: 'QUIZ_1',
@@ -377,7 +380,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   assert.strictEqual(gradeEntry.isManualOverride, true);
 
   // 5.2 Bulk Upsert Grades
-  const bulkRes = facultyGradebookService.bulkUpsertGrades(
+  const bulkRes = await facultyGradebookService.bulkUpsertGrades(
     offeringId,
     [
       { studentId: 'stu-profile-02', component: 'QUIZ_1', maxMarks: 20, obtainedMarks: 16 },
@@ -408,19 +411,19 @@ export async function runOperationalGapsTests(): Promise<void> {
     },
   ];
 
-  const syncResult = gradeSyncWorker.syncLmsScores(ltiScores);
+  const syncResult = await gradeSyncWorker.syncLmsScores(ltiScores);
   assert.strictEqual(syncResult.skippedOverrideCount, 1, 'Manual override must be skipped by LTI sync');
   assert.strictEqual(syncResult.records[0].preservedManualOverride, true, 'Faculty manual grade must be preserved');
 
   // Verify faculty grade in gradebook remains 19/20
-  const persistedEntry = facultyGradebookService.getGradeEntry(offeringId, studentId, 'QUIZ_1');
+  const persistedEntry = await facultyGradebookService.getGradeEntry(offeringId, studentId, 'QUIZ_1');
   assert.strictEqual(persistedEntry?.obtainedMarks, 19, 'Faculty score must NOT be overwritten by LMS');
 
   // 5.4 Gradebook Locking
-  facultyGradebookService.lockGradebook(offeringId, faculty1Id);
-  assert.throws(
-    () => {
-      facultyGradebookService.saveGradeEntry({
+  await facultyGradebookService.lockGradebook(offeringId, faculty1Id);
+  await assert.rejects(
+    async () => {
+      await facultyGradebookService.saveGradeEntry({
         offeringId,
         studentId,
         component: 'QUIZ_1',
@@ -432,7 +435,7 @@ export async function runOperationalGapsTests(): Promise<void> {
     /GRADEBOOK_LOCKED/,
     'Modifications to locked gradebook must be rejected'
   );
-  facultyGradebookService.unlockGradebook(offeringId);
+  await facultyGradebookService.unlockGradebook(offeringId);
   console.log('  ✓ Gap 5: Direct CIA Gradebook & LTI Sync Override Protection Passed');
 
   // =========================================================================
@@ -441,7 +444,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   console.log('Test 3.6: Notification Center, VAPID Web Push & Cohort Broadcasting');
 
   // 6.1 In-App Notification Inbox
-  const notif = notificationCenter.sendNotification({
+  const notif = await notificationCenter.sendNotification({
     userId: studentId,
     title: 'Timetable Update',
     body: 'Classroom moved to LH-204 for CS301',
@@ -449,10 +452,10 @@ export async function runOperationalGapsTests(): Promise<void> {
     channel: 'IN_APP',
   });
   assert.strictEqual(notif.isRead, false);
-  assert.strictEqual(notificationCenter.getUnreadCount(studentId), 1);
+  assert.strictEqual(await notificationCenter.getUnreadCount(studentId), 1);
 
-  notificationCenter.markAsRead(notif.id, studentId);
-  assert.strictEqual(notificationCenter.getUnreadCount(studentId), 0);
+  await notificationCenter.markAsRead(notif.id, studentId);
+  assert.strictEqual(await notificationCenter.getUnreadCount(studentId), 0);
 
   // 6.2 VAPID EC Key Generation
   const vapidKeys = notificationCenter.generateVapidKeys();
@@ -460,7 +463,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   assert.ok(vapidKeys.privateKey.length > 50, 'VAPID private key must be valid base64url');
 
   // 6.3 Register Push Subscription
-  const subscription = notificationCenter.registerPushSubscription({
+  const subscription = await notificationCenter.registerPushSubscription({
     userId: studentId,
     endpoint: 'https://fcm.googleapis.com/fcm/send/sample-token-123',
     p256dhKey: 'BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QT9P04A==',
@@ -469,7 +472,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   assert.ok(subscription.id.startsWith('sub-'));
 
   // 6.4 Cohort Broadcasting
-  const broadcastResult = notificationCenter.broadcastToCohort(
+  const broadcastResult = await notificationCenter.broadcastToCohort(
     { role: 'STUDENT' },
     {
       title: 'Fee Payment Deadline Reminder',
@@ -486,7 +489,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   // =========================================================================
   console.log('Test 3.7: Academic Terms & Calendar Enforcement Gatekeepers');
 
-  const term = academicCalendarService.createTerm({
+  const term = await academicCalendarService.createTerm({
     name: 'Spring 2026 Semester',
     academicYear: '2025-2026',
     semesterType: 'EVEN',
@@ -499,7 +502,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   });
 
   // Calendar Event
-  academicCalendarService.addCalendarEvent({
+  await academicCalendarService.addCalendarEvent({
     termId: term.id,
     title: 'Republic Day Holiday',
     eventType: 'HOLIDAY',
@@ -513,21 +516,21 @@ export async function runOperationalGapsTests(): Promise<void> {
   const duringReg = new Date('2026-01-02T00:00:00Z');
   const afterReg = new Date('2026-01-15T00:00:00Z');
 
-  assert.strictEqual(academicCalendarService.isRegistrationOpen(term.id, beforeReg).allowed, false);
-  assert.strictEqual(academicCalendarService.isRegistrationOpen(term.id, duringReg).allowed, true);
-  assert.strictEqual(academicCalendarService.isRegistrationOpen(term.id, afterReg).allowed, false);
+  assert.strictEqual((await academicCalendarService.isRegistrationOpen(term.id, beforeReg)).allowed, false);
+  assert.strictEqual((await academicCalendarService.isRegistrationOpen(term.id, duringReg)).allowed, true);
+  assert.strictEqual((await academicCalendarService.isRegistrationOpen(term.id, afterReg)).allowed, false);
 
   // 7.2 Add/Drop Deadline Gatekeeper
   const beforeAddDrop = new Date('2026-01-18T00:00:00Z');
   const afterAddDrop = new Date('2026-01-25T00:00:00Z');
-  assert.strictEqual(academicCalendarService.canAddDropCourse(term.id, beforeAddDrop).allowed, true);
-  assert.strictEqual(academicCalendarService.canAddDropCourse(term.id, afterAddDrop).allowed, false);
+  assert.strictEqual((await academicCalendarService.canAddDropCourse(term.id, beforeAddDrop)).allowed, true);
+  assert.strictEqual((await academicCalendarService.canAddDropCourse(term.id, afterAddDrop)).allowed, false);
 
   // 7.3 Grade Lock Deadline Gatekeeper
   const beforeGradeLock = new Date('2026-05-25T00:00:00Z');
   const afterGradeLock = new Date('2026-06-05T00:00:00Z');
-  assert.strictEqual(academicCalendarService.isGradeSubmissionOpen(term.id, beforeGradeLock).allowed, true);
-  assert.strictEqual(academicCalendarService.isGradeSubmissionOpen(term.id, afterGradeLock).allowed, false);
+  assert.strictEqual((await academicCalendarService.isGradeSubmissionOpen(term.id, beforeGradeLock)).allowed, true);
+  assert.strictEqual((await academicCalendarService.isGradeSubmissionOpen(term.id, afterGradeLock)).allowed, false);
   console.log('  ✓ Gap 7: Academic Terms & Calendar Gatekeepers Passed');
 
   // =========================================================================
@@ -538,7 +541,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   const parentUserId = 'usr-parent-01';
 
   // 8.1 Link Guardian with Granular Permissions
-  const guardianLink = guardianshipService.linkGuardian({
+  const guardianLink = await guardianshipService.linkGuardian({
     studentId,
     guardianUserId: parentUserId,
     relationship: 'FATHER',
@@ -557,22 +560,22 @@ export async function runOperationalGapsTests(): Promise<void> {
   assert.strictEqual(guardianLink.isPrimaryContact, true);
 
   // 8.2 Permission Checks
-  assert.strictEqual(guardianshipService.checkGuardianPermission(parentUserId, studentId, 'canViewGrades'), true);
-  assert.strictEqual(guardianshipService.checkGuardianPermission(parentUserId, studentId, 'canApplyLeave'), false);
+  assert.strictEqual(await guardianshipService.checkGuardianPermission(parentUserId, studentId, 'canViewGrades'), true);
+  assert.strictEqual(await guardianshipService.checkGuardianPermission(parentUserId, studentId, 'canApplyLeave'), false);
 
   // 8.3 Update Permission Flag
-  guardianshipService.updatePermissions(studentId, parentUserId, { canApplyLeave: true });
-  assert.strictEqual(guardianshipService.checkGuardianPermission(parentUserId, studentId, 'canApplyLeave'), true);
+  await guardianshipService.updatePermissions(studentId, parentUserId, { canApplyLeave: true });
+  assert.strictEqual(await guardianshipService.checkGuardianPermission(parentUserId, studentId, 'canApplyLeave'), true);
 
   // 8.4 Emergency Contact Lookup for Warden
-  const emergencyContacts = guardianshipService.getEmergencyContacts(studentId);
+  const emergencyContacts = await guardianshipService.getEmergencyContacts(studentId);
   assert.strictEqual(emergencyContacts.length, 1);
   assert.strictEqual(emergencyContacts[0].user?.name, 'Suresh Kumar');
 
   // 8.5 Reject Non-Parent Role
-  assert.throws(
-    () => {
-      guardianshipService.linkGuardian({
+  await assert.rejects(
+    async () => {
+      await guardianshipService.linkGuardian({
         studentId,
         guardianUserId: faculty1Id, // FACULTY role, not PARENT
         relationship: 'LOCAL_GUARDIAN',
@@ -688,9 +691,9 @@ export async function runOperationalGapsTests(): Promise<void> {
   console.log('\nTest 3.10: Deep Operational Gaps Edge Cases & Invariants Audit');
 
   // 10.1 Leave Date Ordering Validation
-  assert.throws(
-    () => {
-      leaveService.applyStudentLeave({
+  await assert.rejects(
+    async () => {
+      await leaveService.applyStudentLeave({
         studentId,
         leaveType: 'CASUAL',
         startDate: '2025-11-20',
@@ -704,7 +707,7 @@ export async function runOperationalGapsTests(): Promise<void> {
 
   // 10.2 Substitute Faculty Already on Leave Conflict Check
   // Apply approved leave for faculty 2 first
-  const fac2Leave = leaveService.applyFacultyLeave({
+  const fac2Leave = await leaveService.applyFacultyLeave({
     facultyId: faculty2Id,
     leaveType: 'CASUAL',
     startDate: '2025-12-01',
@@ -712,12 +715,12 @@ export async function runOperationalGapsTests(): Promise<void> {
     reason: 'Research sabbatical',
     substituteFacultyId: faculty1Id,
   });
-  leaveService.approveByHod(fac2Leave.id, hodId);
+  await leaveService.approveByHod(fac2Leave.id, hodId);
 
   // Now faculty 1 tries to nominate faculty 2 as substitute during overlapping dates -> MUST REJECT!
-  assert.throws(
-    () => {
-      leaveService.applyFacultyLeave({
+  await assert.rejects(
+    async () => {
+      await leaveService.applyFacultyLeave({
         facultyId: faculty1Id,
         leaveType: 'CASUAL',
         startDate: '2025-12-02',
@@ -731,7 +734,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   );
 
   // 10.3 Leave Cancellation & On-Duty Pass Revocation
-  const cancelTestLeave = leaveService.applyStudentLeave({
+  const cancelTestLeave = await leaveService.applyStudentLeave({
     studentId,
     leaveType: 'ON_DUTY',
     startDate: '2025-12-10',
@@ -739,13 +742,13 @@ export async function runOperationalGapsTests(): Promise<void> {
     reason: 'National Debate Championship',
     isOnDuty: true,
   });
-  leaveService.approveByMentor(cancelTestLeave.id, mentorId);
-  const { onDutyPass: issuedPass } = leaveService.approveByHod(cancelTestLeave.id, hodId);
+  await leaveService.approveByMentor(cancelTestLeave.id, mentorId);
+  const { onDutyPass: issuedPass } = await leaveService.approveByHod(cancelTestLeave.id, hodId);
   assert.ok(issuedPass);
-  assert.strictEqual(leaveService.verifyOnDutyPass(issuedPass.passNumber).isValid, true);
+  assert.strictEqual((await leaveService.verifyOnDutyPass(issuedPass.passNumber)).isValid, true);
 
   // Cancel the leave
-  const { application: cancelledApp, revokedOnDutyPass } = leaveService.cancelLeave(
+  const { application: cancelledApp, revokedOnDutyPass } = await leaveService.cancelLeave(
     cancelTestLeave.id,
     studentId,
     'Debate championship postponed'
@@ -754,14 +757,14 @@ export async function runOperationalGapsTests(): Promise<void> {
   assert.strictEqual(revokedOnDutyPass?.isVerified, false);
 
   // Gate check on revoked OD pass MUST FAIL
-  const gateCheckRevoked = leaveService.verifyOnDutyPass(issuedPass.passNumber);
+  const gateCheckRevoked = await leaveService.verifyOnDutyPass(issuedPass.passNumber);
   assert.strictEqual(gateCheckRevoked.isValid, false);
   assert.strictEqual(gateCheckRevoked.message, 'INVALID_OR_REVOKED_PASS');
 
   // 10.4 Attendance Override Authorization Guard on Empty Records
-  assert.throws(
-    () => {
-      attendanceOverrideService.applyApprovedLeaveOverride(
+  await assert.rejects(
+    async () => {
+      await attendanceOverrideService.applyApprovedLeaveOverride(
         cancelTestLeave.id,
         'usr-stu-01',
         'STUDENT' // Unauthorized role!
@@ -772,9 +775,9 @@ export async function runOperationalGapsTests(): Promise<void> {
   );
 
   // 10.5 Attendance Override Mandatory Reason Description
-  assert.throws(
-    () => {
-      attendanceOverrideService.overrideAttendance({
+  await assert.rejects(
+    async () => {
+      await attendanceOverrideService.overrideAttendance({
         attendanceRecordId: attRecordId,
         newStatus: 'PRESENT',
         reasonCode: 'TEACHER_ERROR',
@@ -788,9 +791,9 @@ export async function runOperationalGapsTests(): Promise<void> {
   );
 
   // 10.6 Feedback Survey Validation: 0 questions rejected, invalid question ID rejected
-  assert.throws(
-    () => {
-      feedbackService.createSurvey({
+  await assert.rejects(
+    async () => {
+      await feedbackService.createSurvey({
         academicYear: '2025-2026',
         stakeholderType: 'STUDENT',
         title: 'Empty Survey',
@@ -801,16 +804,16 @@ export async function runOperationalGapsTests(): Promise<void> {
     'Survey with 0 questions must be rejected'
   );
 
-  const testSurvey = feedbackService.createSurvey({
+  const testSurvey = await feedbackService.createSurvey({
     academicYear: '2025-2026',
     stakeholderType: 'STUDENT',
     title: 'Closure Survey Test',
     questions: [{ questionText: 'Q1', category: 'CURRICULUM' }],
   });
 
-  assert.throws(
-    () => {
-      feedbackService.submitResponse({
+  await assert.rejects(
+    async () => {
+      await feedbackService.submitResponse({
         surveyId: testSurvey.survey.id,
         ratings: { 'fake-question-id': 5 },
       });
@@ -820,10 +823,10 @@ export async function runOperationalGapsTests(): Promise<void> {
   );
 
   // Close survey and verify submission blocked
-  feedbackService.closeSurvey(testSurvey.survey.id);
-  assert.throws(
-    () => {
-      feedbackService.submitResponse({
+  await feedbackService.closeSurvey(testSurvey.survey.id);
+  await assert.rejects(
+    async () => {
+      await feedbackService.submitResponse({
         surveyId: testSurvey.survey.id,
         ratings: { [testSurvey.questions[0].id]: 5 },
       });
@@ -833,24 +836,25 @@ export async function runOperationalGapsTests(): Promise<void> {
   );
 
   // 10.7 NAAC Metric 1.4 Baseline on Empty Year
-  const emptyNaac = feedbackService.computeNaacMetric14('1999-2000');
+  const emptyNaac = await feedbackService.computeNaacMetric14('1999-2000');
   assert.strictEqual(emptyNaac.averageLikertScore, 0);
   assert.strictEqual(emptyNaac.naacMetric1_4_Compliant, false);
 
   // 10.8 Grievance updateStatus to RESOLVED sets resolvedAt & checks SLA
-  const directGrv = grievanceService.fileGrievance({
+  const directGrv = await grievanceService.fileGrievance({
     complainantId: 'usr-stu-01',
     category: 'ACADEMIC',
     title: 'Grade Discrepancy Inquiry',
     description: 'Marks re-check requested',
   });
-  grievanceService.updateStatus(directGrv.id, 'RESOLVED', 'usr-hod-01', 'Re-evaluation completed, score updated');
-  assert.strictEqual(directGrv.status, 'RESOLVED');
-  assert.ok(directGrv.resolvedAt, 'resolvedAt must be set on updateStatus to RESOLVED');
-  assert.strictEqual(directGrv.isSlaBreached, false);
+  await grievanceService.updateStatus(directGrv.id, 'RESOLVED', 'usr-hod-01', 'Re-evaluation completed, score updated');
+  const directGrvAfter = (await db.grievanceTickets.get(directGrv.id))!;
+  assert.strictEqual(directGrvAfter.status, 'RESOLVED');
+  assert.ok(directGrvAfter.resolvedAt, 'resolvedAt must be set on updateStatus to RESOLVED');
+  assert.strictEqual(directGrvAfter.isSlaBreached, false);
 
   // 10.9 Library Duplicate Borrowing Disallowed & Overdue Student Blocked
-  const testBook2 = libraryService.addBook({
+  const testBook2 = await libraryService.addBook({
     isbn: '978-0134685991',
     title: 'Effective Java 3rd Edition',
     author: 'Joshua Bloch',
@@ -858,11 +862,11 @@ export async function runOperationalGapsTests(): Promise<void> {
     callNumber: 'QA76.73.J38 B56',
     totalCopies: 5,
   });
-  libraryService.issueBook(testBook2.id, studentId, 14);
+  await libraryService.issueBook(testBook2.id, studentId, 14);
 
-  assert.throws(
-    () => {
-      libraryService.issueBook(testBook2.id, studentId, 14);
+  await assert.rejects(
+    async () => {
+      await libraryService.issueBook(testBook2.id, studentId, 14);
     },
     /DUPLICATE_LOAN_DISALLOWED/,
     'Borrowing the same book twice concurrently must be rejected'
@@ -871,7 +875,7 @@ export async function runOperationalGapsTests(): Promise<void> {
   // 10.10 Gradebook Component-Specific Override Protection vs LMS Sync
   // Setup offering with QUIZ_1 manual override and verify ASSIGNMENT_2 can sync
   const componentTestOffering = 'offering-comp-isolation-test';
-  db.courseOfferings.set(componentTestOffering, {
+  await db.courseOfferings.set(componentTestOffering, {
     id: componentTestOffering,
     courseId: 'crs-cse-301',
     semester: 4,
@@ -883,7 +887,7 @@ export async function runOperationalGapsTests(): Promise<void> {
     waitlistCount: 0,
   });
 
-  facultyGradebookService.saveGradeEntry({
+  await facultyGradebookService.saveGradeEntry({
     offeringId: componentTestOffering,
     studentId,
     component: 'QUIZ_1',
@@ -893,7 +897,7 @@ export async function runOperationalGapsTests(): Promise<void> {
     isManualOverride: true,
   });
 
-  const mixedSyncResult = gradeSyncWorker.syncLmsScores([
+  const mixedSyncResult = await gradeSyncWorker.syncLmsScores([
     {
       studentId,
       offeringId: componentTestOffering,
@@ -916,33 +920,33 @@ export async function runOperationalGapsTests(): Promise<void> {
   assert.strictEqual(mixedSyncResult.syncedCount, 1, 'ASSIGNMENT_2 should sync successfully');
   assert.strictEqual(mixedSyncResult.records[0].preservedManualOverride, true);
   assert.strictEqual(mixedSyncResult.records[1].preservedManualOverride, false);
-  db.courseOfferings.delete(componentTestOffering);
+  await db.courseOfferings.delete(componentTestOffering);
 
   // 10.11 Notification Composable Filters & Inbox Alias Resolution
-  const deptBroadResult = notificationCenter.broadcastToCohort(
+  const deptBroadResult = await notificationCenter.broadcastToCohort(
     { role: 'FACULTY', departmentId: 'dept-cse' },
     { title: 'CSE Faculty Meeting', body: 'Agenda: Curriculum Revision' }
   );
   assert.ok(deptBroadResult.recipientCount >= 1);
 
   // Alias test: Send to studentProfile ID, read via user ID
-  const aliasNotif = notificationCenter.sendNotification({
+  const aliasNotif = await notificationCenter.sendNotification({
     userId: 'stu-profile-01',
     title: 'Alias Test',
     body: 'Verifying alias resolution',
   });
-  const unreadBefore = notificationCenter.getUnreadCount('usr-stu-01');
+  const unreadBefore = await notificationCenter.getUnreadCount('usr-stu-01');
   assert.ok(unreadBefore >= 1, 'Unread count by user ID must include notifications sent to profile ID');
-  notificationCenter.markAsRead(aliasNotif.id, 'usr-stu-01');
-  const userInbox = notificationCenter.getInbox('usr-stu-01');
+  await notificationCenter.markAsRead(aliasNotif.id, 'usr-stu-01');
+  const userInbox = await notificationCenter.getInbox('usr-stu-01');
   const foundNotif = userInbox.find((n) => n.id === aliasNotif.id);
   assert.ok(foundNotif);
   assert.strictEqual(foundNotif?.isRead, true);
 
   // 10.12 Calendar Event Date Ordering & Instructional Days Computation
-  assert.throws(
-    () => {
-      academicCalendarService.addCalendarEvent({
+  await assert.rejects(
+    async () => {
+      await academicCalendarService.addCalendarEvent({
         termId: 'term-2025-fall',
         title: 'Invalid Event',
         eventType: 'HOLIDAY',
@@ -954,12 +958,12 @@ export async function runOperationalGapsTests(): Promise<void> {
     'Calendar event with end date before start date must be rejected'
   );
 
-  const instrDays = academicCalendarService.getInstructionalDays('term-2025-fall');
+  const instrDays = await academicCalendarService.getInstructionalDays('term-2025-fall');
   assert.ok(instrDays.totalDays > 100);
   assert.ok(instrDays.instructionalDays > 80);
 
   // 10.13 Guardianship Single Primary Contact & Helper Methods
-  const guardianMother = guardianshipService.linkGuardian({
+  const guardianMother = await guardianshipService.linkGuardian({
     studentId,
     guardianUserId: 'usr-parent-01',
     relationship: 'MOTHER',
@@ -976,20 +980,20 @@ export async function runOperationalGapsTests(): Promise<void> {
     createdAt: new Date(),
     updatedAt: new Date(),
   };
-  db.users.set(parent2User.id, parent2User);
+  await db.users.set(parent2User.id, parent2User);
 
-  const guardianFather = guardianshipService.linkGuardian({
+  const guardianFather = await guardianshipService.linkGuardian({
     studentId,
     guardianUserId: parent2User.id,
     relationship: 'FATHER',
     isPrimaryContact: true,
   });
   assert.strictEqual(guardianFather.isPrimaryContact, true);
-  const motherAfter = db.studentGuardians.get(`${studentId}:usr-parent-01`);
+  const motherAfter = await db.studentGuardians.get(`${studentId}:usr-parent-01`);
   assert.strictEqual(motherAfter?.isPrimaryContact, false, 'Previous primary contact must be demoted');
 
-  assert.strictEqual(guardianshipService.canGuardianViewAttendance(parent2User.id, studentId), true);
-  assert.strictEqual(guardianshipService.canGuardianPayFees(parent2User.id, studentId), true);
+  assert.strictEqual(await guardianshipService.canGuardianViewAttendance(parent2User.id, studentId), true);
+  assert.strictEqual(await guardianshipService.canGuardianPayFees(parent2User.id, studentId), true);
 
   // 10.14 RBAC Security Route Guards on All 9 Operational Routes
   // Students must NOT access grade locking, library catalog management, or grievance resolution
@@ -1008,10 +1012,10 @@ export async function runOperationalGapsTests(): Promise<void> {
   console.log('  ✓ Section 10: Deep Operational Gaps Edge Cases, Invariants & Security Passed');
 
   // Cleanup test-isolated artifacts
-  db.courseOfferings.delete('offering-cia-test-s1');
-  db.attendanceRecords.delete('att-test-override-01');
-  db.timetableSlots.delete('slot-fac1-mon-9am');
-  db.timetableSlots.delete('slot-fac2-mon-overlap');
+  await db.courseOfferings.delete('offering-cia-test-s1');
+  await db.attendanceRecords.delete('att-test-override-01');
+  await db.timetableSlots.delete('slot-fac1-mon-9am');
+  await db.timetableSlots.delete('slot-fac2-mon-overlap');
 
   console.log('\n=== ALL 9 OPERATIONAL GAP TESTS PASSED (100%) ===\n');
 }

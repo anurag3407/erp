@@ -50,16 +50,17 @@ export class NaacTelemetryService {
   /**
    * Aggregate live data from ERP tables to compute Criteria 1-7 telemetry
    */
-  computeLiveTelemetry(academicYear: string = '2025-2026'): NaacCriteriaBreakdown {
-    const totalStudents = Math.max(1, db.studentProfiles.size || 1200);
-    const facultyCount = Math.max(1, Array.from(db.users.values()).filter((u) => u.role === 'FACULTY').length || 80);
+  async computeLiveTelemetry(academicYear: string = '2025-2026'): Promise<NaacCriteriaBreakdown> {
+    const totalStudents = Math.max(1, (await db.studentProfiles.count()) || 1200);
+    const facultyCount = Math.max(1, (await db.users.values()).filter((u) => u.role === 'FACULTY').length || 80);
     const str = `${Math.round(totalStudents / facultyCount)}:1`;
 
-    const totalOfferings = Math.max(1, db.courseOfferings.size || 45);
-    const electiveOfferings = Array.from(db.courses.values()).filter(
+    const totalOfferings = Math.max(1, (await db.courseOfferings.count()) || 45);
+    const allCourses = await db.courses.values();
+    const electiveOfferings = allCourses.filter(
       (c) => c.bucketType === 'DISCIPLINE_ELECTIVE' || c.bucketType === 'OPEN_ELECTIVE'
     ).length;
-    const electivePct = Math.round((electiveOfferings / Math.max(1, db.courses.size)) * 100);
+    const electivePct = Math.round((electiveOfferings / Math.max(1, allCourses.length)) * 100);
 
     const breakdown: NaacCriteriaBreakdown = {
       academicYear,
@@ -108,7 +109,7 @@ export class NaacTelemetryService {
       computedData: breakdown as unknown as Record<string, unknown>,
       lastComputedAt: new Date(),
     };
-    db.naacCache.set(`${academicYear}:SSR_MASTER`, cacheEntry);
+    await db.naacCache.set(`${academicYear}:SSR_MASTER`, cacheEntry);
 
     return breakdown;
   }

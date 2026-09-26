@@ -19,7 +19,7 @@ export async function runIntegrationTests(): Promise<void> {
   const maxCapacity = 60;
 
   // Initialize course offering in DB & Redis
-  db.courseOfferings.set(offeringId, {
+  await db.courseOfferings.set(offeringId, {
     id: offeringId,
     courseId: 'crs-cse-301',
     semester: 4,
@@ -63,7 +63,7 @@ export async function runIntegrationTests(): Promise<void> {
   const p95 = latencies[Math.floor(latencies.length * 0.95)];
   const p99 = latencies[Math.floor(latencies.length * 0.99)];
 
-  const finalOffering = db.courseOfferings.get(offeringId);
+  const finalOffering = await db.courseOfferings.get(offeringId);
   const finalEnrolledCount = finalOffering?.enrolledCount || 0;
 
   console.log(`  Requests: ${CONCURRENT_REQUESTS}`);
@@ -127,7 +127,7 @@ export async function runIntegrationTests(): Promise<void> {
   // 4. Auto-Healing Payment Poller Integration
   console.log('\nTest 2.4: Auto-Healing Payment Poller Reconciliation');
   const pollerOrderId = `order_poller_${Date.now()}`;
-  db.paymentTransactions.set(pollerOrderId, {
+  await db.paymentTransactions.set(pollerOrderId, {
     id: `tx-${pollerOrderId}`,
     studentId: 'stu-profile-01',
     feeStructureId: 'fee-struct-01',
@@ -143,7 +143,7 @@ export async function runIntegrationTests(): Promise<void> {
 
   const pollerReport = await autoHealingPaymentPoller.runReconciliationSweep();
   assert.ok(pollerReport.healedCount >= 1, 'Poller must heal stuck pending transaction');
-  const healedTx = db.paymentTransactions.get(pollerOrderId);
+  const healedTx = await db.paymentTransactions.get(pollerOrderId);
   assert.strictEqual(healedTx?.status, 'RECONCILED_BY_POLLER', 'Transaction status must update to RECONCILED_BY_POLLER');
   console.log(`  ✓ Auto-Healing Poller Reconciled Pending Order in ${pollerReport.executionTimeMs}ms`);
 

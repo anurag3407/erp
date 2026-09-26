@@ -78,10 +78,10 @@ export async function runE2EWorkflowTests(): Promise<void> {
   assert.strictEqual(geoValidation.isWithinBounds, true, 'Student must be within 25m radius');
 
   // Register WebAuthn hardware device binding
-  webAuthnBindingService.registerDevice(studentId, 'cred-faceid-rohit-iphone', 'pubkey-rohit-ed25519', 'iPhone 15 Pro');
+  await webAuthnBindingService.registerDevice(studentId, 'cred-faceid-rohit-iphone', 'pubkey-rohit-ed25519', 'iPhone 15 Pro');
 
   // Mark attendance through unified AttendanceService (verifies QR, Geofence, WebAuthn & persists to DB)
-  const attendanceResult = attendanceService.markAttendance({
+  const attendanceResult = await attendanceService.markAttendance({
     studentId,
     offeringId,
     token: rollingQr.token,
@@ -95,7 +95,7 @@ export async function runE2EWorkflowTests(): Promise<void> {
   });
   assert.strictEqual(attendanceResult.success, true, 'Attendance must be marked in DB');
   assert.strictEqual(attendanceResult.status, 'PRESENT');
-  assert.ok(db.attendanceRecords.has(attendanceResult.recordId!), 'Record must be saved in attendance database Map');
+  assert.ok(await db.attendanceRecords.has(attendanceResult.recordId!), 'Record must be saved in attendance database');
   console.log(`  [Attendance] Marked PRESENT in Database (Record: ${attendanceResult.recordId}, Dist: ${geoValidation.distanceMeters}m <= 25m, Biometric: Verified)`);
 
   // -------------------------------------------------------------
@@ -112,7 +112,7 @@ export async function runE2EWorkflowTests(): Promise<void> {
       timestamp: new Date().toISOString(),
     },
   ];
-  const lmsSyncResult = gradeSyncWorker.syncLmsScores(lmsGradeBatch);
+  const lmsSyncResult = await gradeSyncWorker.syncLmsScores(lmsGradeBatch);
   assert.strictEqual(lmsSyncResult.syncedCount, 1, 'LMS score must be synced into ERP assessment ledger');
   console.log(`  [LMS Sync] Ingested Quiz Score: 48/50 (${lmsSyncResult.records[0].normalizedCiaScore}%)`);
 
@@ -192,13 +192,13 @@ export async function runE2EWorkflowTests(): Promise<void> {
   assert.ok(order.upiDeepLink?.startsWith('upi://pay'), 'Must generate valid UPI deep-link');
 
   // Emergency 48h Provisional Pass issued for unblocking exam hall entry
-  const provisionalPass = provisionalHallTicketService.issueProvisionalPass({
+  const provisionalPass = await provisionalHallTicketService.issueProvisionalPass({
     studentId,
     examId: 'exam-endsem-2026',
     utrReferenceNumber: 'UTR-HDFC-99887711',
     grantedByUserId: 'usr-admin-01',
   });
-  const gateCheck = provisionalHallTicketService.validatePassAtGate(provisionalPass.id);
+  const gateCheck = await provisionalHallTicketService.validatePassAtGate(provisionalPass.id);
   assert.strictEqual(gateCheck.isValid, true);
   console.log(`  [Finance] 48-Hour Provisional Pass ${provisionalPass.id} Issued & Admitted at Exam Gate`);
 
@@ -279,7 +279,7 @@ export async function runE2EWorkflowTests(): Promise<void> {
   // STEP 11: Continuous NAAC Criteria 1-7 Telemetry & 1-Click SSR
   // -------------------------------------------------------------
   console.log('\nSTEP 11: Continuous NAAC Criteria 1-7 Telemetry & 1-Click SSR Generation');
-  const ssrPackage = ssrExporterService.exportSsr('2025-2026');
+  const ssrPackage = await ssrExporterService.exportSsr('2025-2026');
   assert.ok(ssrPackage.tables.length >= 7);
   console.log(`  [NAAC Telemetry] 1-Click SSR generated with ${ssrPackage.tables.length} tables in ${ssrPackage.generationDurationMs}ms (<60s requirement)`);
 

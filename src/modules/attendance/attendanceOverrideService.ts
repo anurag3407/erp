@@ -30,7 +30,7 @@ export class AttendanceOverrideService {
   /**
    * Override a single attendance record with reason code and audit logging
    */
-  overrideAttendance(req: OverrideAttendanceRequest): OverrideResult {
+  async overrideAttendance(req: OverrideAttendanceRequest): Promise<OverrideResult> {
     // 1. Authorization check
     if (!AttendanceOverrideService.AUTHORIZED_ROLES.includes(req.modifiedByRole)) {
       throw new Error(`UNAUTHORIZED: Role ${req.modifiedByRole} is not permitted to override attendance`);
@@ -41,7 +41,7 @@ export class AttendanceOverrideService {
     }
 
     // 2. Fetch existing attendance record
-    const record = db.attendanceRecords.get(req.attendanceRecordId);
+    const record = await db.attendanceRecords.get(req.attendanceRecordId);
     if (!record) {
       throw new Error(`Attendance record not found: ${req.attendanceRecordId}`);
     }
@@ -50,7 +50,7 @@ export class AttendanceOverrideService {
 
     // 3. Optional Leave Validation
     if (req.linkedLeaveApplicationId) {
-      const leave = db.leaveApplications.get(req.linkedLeaveApplicationId);
+      const leave = await db.leaveApplications.get(req.linkedLeaveApplicationId);
       if (!leave) {
         throw new Error(`Linked leave application not found: ${req.linkedLeaveApplicationId}`);
       }
@@ -83,7 +83,8 @@ export class AttendanceOverrideService {
       timestamp: new Date(),
     };
 
-    db.attendanceOverrideAuditLogs.set(logId, auditLog);
+    await db.attendanceRecords.set(record.id, record);
+    await db.attendanceOverrideAuditLogs.set(logId, auditLog);
 
     return {
       success: true,
@@ -97,17 +98,17 @@ export class AttendanceOverrideService {
    * Automatically apply attendance overrides for an approved leave application
    * Updates all attendance records within the leave date range for the applicant student.
    */
-  applyApprovedLeaveOverride(
+  async applyApprovedLeaveOverride(
     leaveApplicationId: string,
     performedByUserId: string,
     performedByRole: UserRole
-  ): { processedCount: number; auditLogs: AttendanceOverrideAuditLog[] } {
+  ): Promise<{ processedCount: number; auditLogs: AttendanceOverrideAuditLog[] }> {
     // 1. Authorization check
     if (!AttendanceOverrideService.AUTHORIZED_ROLES.includes(performedByRole)) {
       throw new Error(`UNAUTHORIZED: Role ${performedByRole} is not permitted to override attendance`);
     }
 
-    const leave = db.leaveApplications.get(leaveApplicationId);
+    const leave = await db.leaveApplications.get(leaveApplicationId);
     if (!leave) {
       throw new Error(`Leave application not found: ${leaveApplicationId}`);
     }
@@ -126,7 +127,7 @@ export class AttendanceOverrideService {
       ? 'MEDICAL_LEAVE'
       : 'OFFICIAL_DUTY_EXEMPTION';
 
-    const matchingRecords = Array.from(db.attendanceRecords.values()).filter((rec) => {
+    const matchingRecords = (await db.attendanceRecords.values()).filter((rec) => {
       if (rec.studentId !== leave.applicantId) return false;
       const recDateStr = rec.timestamp.toISOString().split('T')[0];
       const inRange = recDateStr >= leave.startDate && recDateStr <= leave.endDate;
@@ -136,7 +137,7 @@ export class AttendanceOverrideService {
     const auditLogs: AttendanceOverrideAuditLog[] = [];
 
     for (const rec of matchingRecords) {
-      const result = this.overrideAttendance({
+      const result = await this.overrideAttendance({
         attendanceRecordId: rec.id,
         newStatus: 'PRESENT',
         reasonCode,
@@ -157,8 +158,8 @@ export class AttendanceOverrideService {
   /**
    * Retrieve full audit history for an attendance record
    */
-  getAuditHistory(attendanceRecordId: string): AttendanceOverrideAuditLog[] {
-    return Array.from(db.attendanceOverrideAuditLogs.values())
+  async getAuditHistory(attendanceRecordId: string): Promise<AttendanceOverrideAuditLog[]> {
+    return (await db.attendanceOverrideAuditLogs.values())
       .filter((log) => log.attendanceRecordId === attendanceRecordId)
       .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
   }
@@ -166,8 +167,8 @@ export class AttendanceOverrideService {
   /**
    * Retrieve audit logs by student
    */
-  getAuditHistoryForStudent(studentId: string): AttendanceOverrideAuditLog[] {
-    return Array.from(db.attendanceOverrideAuditLogs.values())
+  async getAuditHistoryForStudent(studentId: string): Promise<AttendanceOverrideAuditLog[]> {
+    return (await db.attendanceOverrideAuditLogs.values())
       .filter((log) => log.studentId === studentId)
       .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
   }

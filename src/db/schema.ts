@@ -1,4 +1,4 @@
-import { pgTable, text, integer, timestamp, numeric, boolean, uuid, pgEnum, jsonb, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, timestamp, numeric, boolean, pgEnum, jsonb, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
  * Enterprise College ERP - Drizzle PostgreSQL Schema
@@ -33,11 +33,11 @@ export const creditBucketTypeEnum = pgEnum('credit_bucket_type', [
 
 // 1. Users Table
 export const users = pgTable('users', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: text('id').primaryKey(),
   email: text('email').notNull().unique(),
   name: text('name').notNull(),
   role: userRoleEnum('role').notNull(),
-  departmentId: uuid('department_id'),
+  departmentId: text('department_id'),
   passwordHash: text('password_hash').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -45,15 +45,15 @@ export const users = pgTable('users', {
 
 // 2. Departments
 export const departments = pgTable('departments', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: text('id').primaryKey(),
   code: text('code').notNull().unique(),
   name: text('name').notNull(),
 });
 
 // 3. Academic Programs
 export const programs = pgTable('programs', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  departmentId: uuid('department_id').notNull().references(() => departments.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  departmentId: text('department_id').notNull().references(() => departments.id, { onDelete: 'cascade' }),
   code: text('code').notNull().unique(),
   name: text('name').notNull(),
   degreeType: text('degree_type').notNull(), // B.Tech, M.Tech, B.Sc, etc.
@@ -63,15 +63,15 @@ export const programs = pgTable('programs', {
 
 // 4. Student Profiles
 export const studentProfiles = pgTable('student_profiles', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   rollNumber: text('roll_number').notNull().unique(),
   apaarId: text('apaar_id').notNull().unique(), // DigiLocker / ABC ID
-  programId: uuid('program_id').notNull().references(() => programs.id, { onDelete: 'cascade' }),
+  programId: text('program_id').notNull().references(() => programs.id, { onDelete: 'cascade' }),
   currentSemester: integer('current_semester').notNull().default(1),
   admissionYear: integer('admission_year').notNull(),
   academicStatus: text('academic_status').notNull().default('ACTIVE'),
-  mentorId: uuid('mentor_id').references(() => users.id),
+  mentorId: text('mentor_id').references(() => users.id),
   cgpa: numeric('cgpa', { precision: 4, scale: 2 }).notNull().default('0.00'),
   totalEarnedCredits: integer('total_earned_credits').notNull().default(0),
   nepExitLevel: integer('nep_exit_level').notNull().default(1),
@@ -79,10 +79,10 @@ export const studentProfiles = pgTable('student_profiles', {
 
 // 5. Courses Catalog
 export const courses = pgTable('courses', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: text('id').primaryKey(),
   code: text('code').notNull().unique(),
   name: text('name').notNull(),
-  departmentId: uuid('department_id').notNull().references(() => departments.id),
+  departmentId: text('department_id').notNull().references(() => departments.id),
   credits: integer('credits').notNull(),
   lectureHours: integer('lecture_hours').notNull().default(3),
   tutorialHours: integer('tutorial_hours').notNull().default(0),
@@ -93,11 +93,11 @@ export const courses = pgTable('courses', {
 
 // 6. Course Offerings (Sections & Seats)
 export const courseOfferings = pgTable('course_offerings', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  courseId: uuid('course_id').notNull().references(() => courses.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  courseId: text('course_id').notNull().references(() => courses.id, { onDelete: 'cascade' }),
   semester: integer('semester').notNull(),
   academicYear: text('academic_year').notNull(),
-  facultyId: uuid('faculty_id').notNull().references(() => users.id),
+  facultyId: text('faculty_id').notNull().references(() => users.id),
   maxCapacity: integer('max_capacity').notNull(),
   enrolledCount: integer('enrolled_count').notNull().default(0),
   section: text('section').notNull().default('A'),
@@ -106,17 +106,17 @@ export const courseOfferings = pgTable('course_offerings', {
 
 // 7. Enrollments
 export const enrollments = pgTable('enrollments', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  studentId: uuid('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
-  offeringId: uuid('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  studentId: text('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
+  offeringId: text('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
   enrollmentStatus: text('enrollment_status').notNull().default('CONFIRMED'),
   enrolledAt: timestamp('enrolled_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // 8. Virtual Waiting Room Tokens
 export const registrationQueueTokens = pgTable('registration_queue_tokens', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  studentId: uuid('student_id').notNull(),
+  id: text('id').primaryKey(),
+  studentId: text('student_id').notNull(),
   tokenHash: text('token_hash').notNull().unique(),
   grantedAt: timestamp('granted_at', { withTimezone: true }).defaultNow().notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -125,8 +125,8 @@ export const registrationQueueTokens = pgTable('registration_queue_tokens', {
 
 // 9. Degree Requirements (DAG Architecture)
 export const degreeRequirements = pgTable('degree_requirements', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  programId: uuid('program_id').notNull().references(() => programs.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  programId: text('program_id').notNull().references(() => programs.id, { onDelete: 'cascade' }),
   bucketType: creditBucketTypeEnum('bucket_type').notNull(),
   requiredCredits: integer('required_credits').notNull(),
   minCourses: integer('min_courses').notNull(),
@@ -136,8 +136,8 @@ export const degreeRequirements = pgTable('degree_requirements', {
 
 // 10. Dynamic Rotating QR Attendance Tokens
 export const dynamicAttendanceTokens = pgTable('dynamic_attendance_tokens', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  offeringId: uuid('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  offeringId: text('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
   tokenHash: text('token_hash').notNull().unique(),
   generatedAt: timestamp('generated_at', { withTimezone: true }).defaultNow().notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -148,9 +148,9 @@ export const dynamicAttendanceTokens = pgTable('dynamic_attendance_tokens', {
 
 // 11. Attendance Records
 export const attendanceRecords = pgTable('attendance_records', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  studentId: uuid('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
-  offeringId: uuid('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  studentId: text('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
+  offeringId: text('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
   timestamp: timestamp('timestamp', { withTimezone: true }).defaultNow().notNull(),
   status: text('status').notNull(),
   verificationMethod: text('verification_method').notNull().default('DYNAMIC_QR'),
@@ -162,8 +162,8 @@ export const attendanceRecords = pgTable('attendance_records', {
 
 // 12. Hardware Biometric Device Authenticators
 export const studentAuthenticators = pgTable('student_authenticators', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  studentId: uuid('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  studentId: text('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
   credentialId: text('credential_id').notNull().unique(),
   credentialPublicKey: text('credential_public_key').notNull(),
   counter: integer('counter').notNull().default(0),
@@ -173,8 +173,8 @@ export const studentAuthenticators = pgTable('student_authenticators', {
 
 // 13. Assessments
 export const assessments = pgTable('assessments', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  offeringId: uuid('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  offeringId: text('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   assessmentType: text('assessment_type').notNull(), // CIA, MID_SEM, END_SEM
   maxMarks: integer('max_marks').notNull().default(100),
@@ -184,9 +184,9 @@ export const assessments = pgTable('assessments', {
 
 // 14. Exam Seating Allocations (Anti-Cheating Graph Result)
 export const examSeatingAllocations = pgTable('exam_seating_allocations', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  examId: uuid('exam_id').notNull().references(() => assessments.id, { onDelete: 'cascade' }),
-  studentId: uuid('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  examId: text('exam_id').notNull().references(() => assessments.id, { onDelete: 'cascade' }),
+  studentId: text('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
   hallNumber: text('hall_number').notNull(),
   rowNum: integer('row_num').notNull(),
   colNum: integer('col_num').notNull(),
@@ -195,16 +195,16 @@ export const examSeatingAllocations = pgTable('exam_seating_allocations', {
 
 // 15. Double-Blind On-Screen Evaluation (OSV) Scripts
 export const onScreenEvaluationScripts = pgTable('on_screen_evaluation_scripts', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  assessmentId: uuid('assessment_id').notNull().references(() => assessments.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  assessmentId: text('assessment_id').notNull().references(() => assessments.id, { onDelete: 'cascade' }),
   anonymousBarcode: text('anonymous_barcode').notNull().unique(),
-  studentId: uuid('student_id').notNull().references(() => studentProfiles.id),
+  studentId: text('student_id').notNull().references(() => studentProfiles.id),
   scannedPdfUrl: text('scanned_pdf_url').notNull(),
-  evaluator1Id: uuid('evaluator_1_id').references(() => users.id),
+  evaluator1Id: text('evaluator_1_id').references(() => users.id),
   evaluator1Score: numeric('evaluator_1_score', { precision: 5, scale: 2 }),
-  evaluator2Id: uuid('evaluator_2_id').references(() => users.id),
+  evaluator2Id: text('evaluator_2_id').references(() => users.id),
   evaluator2Score: numeric('evaluator_2_score', { precision: 5, scale: 2 }),
-  arbiterId: uuid('arbiter_id').references(() => users.id),
+  arbiterId: text('arbiter_id').references(() => users.id),
   arbiterScore: numeric('arbiter_score', { precision: 5, scale: 2 }),
   finalScore: numeric('final_score', { precision: 5, scale: 2 }),
   status: text('status').notNull().default('AWAITING_FIRST_EVALUATION'),
@@ -212,8 +212,8 @@ export const onScreenEvaluationScripts = pgTable('on_screen_evaluation_scripts',
 
 // 16. Fee Structures & Payments
 export const feeStructures = pgTable('fee_structures', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  programId: uuid('program_id').notNull().references(() => programs.id),
+  id: text('id').primaryKey(),
+  programId: text('program_id').notNull().references(() => programs.id),
   academicYear: text('academic_year').notNull(),
   semester: integer('semester').notNull(),
   feeHead: text('fee_head').notNull(), // Tuition, Exam, Hostel, Lab
@@ -221,9 +221,9 @@ export const feeStructures = pgTable('fee_structures', {
 });
 
 export const paymentTransactions = pgTable('payment_transactions', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  studentId: uuid('student_id').notNull().references(() => studentProfiles.id),
-  feeStructureId: uuid('fee_structure_id').notNull().references(() => feeStructures.id),
+  id: text('id').primaryKey(),
+  studentId: text('student_id').notNull().references(() => studentProfiles.id),
+  feeStructureId: text('fee_structure_id').notNull().references(() => feeStructures.id),
   feeHead: text('fee_head'), // e.g. 'LIBRARY_FINE', 'Tuition', etc.
   orderId: text('order_id').notNull().unique(),
   paymentId: text('payment_id'),
@@ -233,16 +233,17 @@ export const paymentTransactions = pgTable('payment_transactions', {
   status: text('status').notNull().default('PENDING'),
   utrReferenceNumber: text('utr_reference_number'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   reconciledAt: timestamp('reconciled_at', { withTimezone: true }),
 });
 
 // 17. 48-Hour Provisional Hall Tickets
 export const provisionalHallTickets = pgTable('provisional_hall_tickets', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  studentId: uuid('student_id').notNull().references(() => studentProfiles.id),
-  examId: uuid('exam_id').notNull().references(() => assessments.id),
+  id: text('id').primaryKey(),
+  studentId: text('student_id').notNull().references(() => studentProfiles.id),
+  examId: text('exam_id').notNull().references(() => assessments.id),
   utrReferenceNumber: text('utr_reference_number').notNull(),
-  grantedBy: uuid('granted_by').references(() => users.id),
+  grantedBy: text('granted_by').references(() => users.id),
   grantedAt: timestamp('granted_at', { withTimezone: true }).defaultNow().notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   isReconciled: boolean('is_reconciled').notNull().default(false),
@@ -250,19 +251,19 @@ export const provisionalHallTickets = pgTable('provisional_hall_tickets', {
 
 // 18. Timetable Slots (PostgreSQL btree_gist temporal exclusion)
 export const timetableSlots = pgTable('timetable_slots', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  offeringId: uuid('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  offeringId: text('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
   roomNumber: text('room_number').notNull(),
   dayOfWeek: integer('day_of_week').notNull(), // 1 to 6
   startTime: text('start_time').notNull(), // HH:MM
   endTime: text('end_time').notNull(),     // HH:MM
-  facultyId: uuid('faculty_id').notNull().references(() => users.id),
+  facultyId: text('faculty_id').notNull().references(() => users.id),
 });
 
 // 19. Early Warning Academic Risk Indicators (ARS)
 export const studentRiskIndicators = pgTable('student_risk_indicators', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  studentId: uuid('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  studentId: text('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
   calculationDate: text('calculation_date').notNull(),
   attendancePct: numeric('attendance_pct', { precision: 5, scale: 2 }).notNull(),
   ciaScorePct: numeric('cia_score_pct', { precision: 5, scale: 2 }).notNull(),
@@ -276,7 +277,7 @@ export const studentRiskIndicators = pgTable('student_risk_indicators', {
 
 // 20. NAAC / NIRF Telemetry Cache
 export const naacTelemetryCache = pgTable('naac_telemetry_cache', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: text('id').primaryKey(),
   academicYear: text('academic_year').notNull(),
   criterionNumber: integer('criterion_number').notNull(),
   metricCode: text('metric_code').notNull(),
@@ -286,19 +287,19 @@ export const naacTelemetryCache = pgTable('naac_telemetry_cache', {
 
 // 21. Leave Applications
 export const leaveApplications = pgTable('leave_applications', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  applicantId: uuid('applicant_id').notNull(),
+  id: text('id').primaryKey(),
+  applicantId: text('applicant_id').notNull(),
   applicantType: text('applicant_type').notNull(), // STUDENT, FACULTY
   leaveType: text('leave_type').notNull(), // CASUAL, MEDICAL, ON_DUTY, etc.
   startDate: text('start_date').notNull(),
   endDate: text('end_date').notNull(),
   reason: text('reason').notNull(),
   status: text('status').notNull().default('PENDING_MENTOR'),
-  substituteFacultyId: uuid('substitute_faculty_id').references(() => users.id),
+  substituteFacultyId: text('substitute_faculty_id').references(() => users.id),
   substituteApproved: boolean('substitute_approved').default(false),
-  mentorApprovalId: uuid('mentor_approval_id').references(() => users.id),
+  mentorApprovalId: text('mentor_approval_id').references(() => users.id),
   mentorApprovedAt: timestamp('mentor_approved_at', { withTimezone: true }),
-  hodApprovalId: uuid('hod_approval_id').references(() => users.id),
+  hodApprovalId: text('hod_approval_id').references(() => users.id),
   hodApprovedAt: timestamp('hod_approved_at', { withTimezone: true }),
   rejectionReason: text('rejection_reason'),
   isOnDuty: boolean('is_on_duty').notNull().default(false),
@@ -310,9 +311,9 @@ export const leaveApplications = pgTable('leave_applications', {
 
 // 22. On-Duty Passes
 export const onDutyPasses = pgTable('on_duty_passes', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  leaveApplicationId: uuid('leave_application_id').notNull().references(() => leaveApplications.id, { onDelete: 'cascade' }),
-  studentId: uuid('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  leaveApplicationId: text('leave_application_id').notNull().references(() => leaveApplications.id, { onDelete: 'cascade' }),
+  studentId: text('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
   eventName: text('event_name').notNull(),
   eventLocation: text('event_location'),
   startDate: text('start_date').notNull(),
@@ -324,25 +325,25 @@ export const onDutyPasses = pgTable('on_duty_passes', {
 
 // 23. Attendance Override Audit Logs
 export const attendanceOverrideAuditLogs = pgTable('attendance_override_audit_logs', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  attendanceRecordId: uuid('attendance_record_id').notNull().references(() => attendanceRecords.id, { onDelete: 'cascade' }),
-  studentId: uuid('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
-  offeringId: uuid('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  attendanceRecordId: text('attendance_record_id').notNull().references(() => attendanceRecords.id, { onDelete: 'cascade' }),
+  studentId: text('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
+  offeringId: text('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
   previousStatus: text('previous_status').notNull(),
   newStatus: text('new_status').notNull(),
   reasonCode: text('reason_code').notNull(),
   reasonDescription: text('reason_description').notNull(),
-  modifiedByUserId: uuid('modified_by_user_id').notNull().references(() => users.id),
+  modifiedByUserId: text('modified_by_user_id').notNull().references(() => users.id),
   modifiedByRole: text('modified_by_role').notNull(),
-  linkedLeaveApplicationId: uuid('linked_leave_application_id').references(() => leaveApplications.id),
+  linkedLeaveApplicationId: text('linked_leave_application_id').references(() => leaveApplications.id),
   timestamp: timestamp('timestamp', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // 24. Course Feedback Surveys
 export const feedbackSurveys = pgTable('feedback_surveys', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  offeringId: uuid('offering_id').references(() => courseOfferings.id, { onDelete: 'cascade' }),
-  courseId: uuid('course_id').references(() => courses.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  offeringId: text('offering_id').references(() => courseOfferings.id, { onDelete: 'cascade' }),
+  courseId: text('course_id').references(() => courses.id, { onDelete: 'cascade' }),
   academicYear: text('academic_year').notNull(),
   semester: integer('semester'),
   stakeholderType: text('stakeholder_type').notNull(), // STUDENT, TEACHER, ALUMNI, EMPLOYER
@@ -353,16 +354,16 @@ export const feedbackSurveys = pgTable('feedback_surveys', {
 
 // 25. Feedback Questions (5-point Likert)
 export const feedbackQuestions = pgTable('feedback_questions', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  surveyId: uuid('survey_id').notNull().references(() => feedbackSurveys.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  surveyId: text('survey_id').notNull().references(() => feedbackSurveys.id, { onDelete: 'cascade' }),
   questionText: text('question_text').notNull(),
   category: text('category').notNull(), // CURRICULUM, PEDAGOGY, COURSE_OUTCOMES, FACILITIES
 });
 
 // 26. Feedback Responses
 export const feedbackResponses = pgTable('feedback_responses', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  surveyId: uuid('survey_id').notNull().references(() => feedbackSurveys.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  surveyId: text('survey_id').notNull().references(() => feedbackSurveys.id, { onDelete: 'cascade' }),
   respondentId: text('respondent_id'),
   ratings: jsonb('ratings').notNull(), // questionId -> 1-5 score
   comments: text('comments'),
@@ -371,9 +372,9 @@ export const feedbackResponses = pgTable('feedback_responses', {
 
 // 27. Statutory Grievance Tickets (Anti-Ragging, POSH, Academic)
 export const grievanceTickets = pgTable('grievance_tickets', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: text('id').primaryKey(),
   ticketNumber: text('ticket_number').notNull().unique(),
-  complainantId: uuid('complainant_id').references(() => users.id),
+  complainantId: text('complainant_id').references(() => users.id),
   isAnonymous: boolean('is_anonymous').notNull().default(false),
   category: text('category').notNull(), // ANTI_RAGGING, POSH, ACADEMIC, HOSTEL_INFRASTRUCTURE, DISCIPLINARY
   severity: text('severity').notNull().default('NORMAL'),
@@ -392,17 +393,17 @@ export const grievanceTickets = pgTable('grievance_tickets', {
 
 // 28. Grievance Action Logs
 export const grievanceActionLogs = pgTable('grievance_action_logs', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  ticketId: uuid('ticket_id').notNull().references(() => grievanceTickets.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  ticketId: text('ticket_id').notNull().references(() => grievanceTickets.id, { onDelete: 'cascade' }),
   action: text('action').notNull(),
-  performedByUserId: uuid('performed_by_user_id').notNull().references(() => users.id),
+  performedByUserId: text('performed_by_user_id').notNull().references(() => users.id),
   notes: text('notes'),
   timestamp: timestamp('timestamp', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // 29. Library Book Catalog
 export const libraryBooks = pgTable('library_books', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: text('id').primaryKey(),
   isbn: text('isbn').notNull().unique(),
   title: text('title').notNull(),
   author: text('author').notNull(),
@@ -410,35 +411,35 @@ export const libraryBooks = pgTable('library_books', {
   callNumber: text('call_number').notNull(),
   totalCopies: integer('total_copies').notNull().default(1),
   availableCopies: integer('available_copies').notNull().default(1),
-  departmentId: uuid('department_id').references(() => departments.id),
+  departmentId: text('department_id').references(() => departments.id),
 });
 
 // 30. Book Loan Circulation
 export const bookLoans = pgTable('book_loans', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  bookId: uuid('book_id').notNull().references(() => libraryBooks.id, { onDelete: 'cascade' }),
-  studentId: uuid('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  bookId: text('book_id').notNull().references(() => libraryBooks.id, { onDelete: 'cascade' }),
+  studentId: text('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
   issuedAt: timestamp('issued_at', { withTimezone: true }).defaultNow().notNull(),
   dueDate: timestamp('due_date', { withTimezone: true }).notNull(),
   returnedAt: timestamp('returned_at', { withTimezone: true }),
   renewalCount: integer('renewal_count').notNull().default(0),
   status: text('status').notNull().default('ISSUED'),
   overdueFineAmount: numeric('overdue_fine_amount', { precision: 10, scale: 2 }).notNull().default('0.00'),
-  fineTransactionId: uuid('fine_transaction_id').references(() => paymentTransactions.id),
+  fineTransactionId: text('fine_transaction_id').references(() => paymentTransactions.id),
 });
 
 // 31. Direct CIA Faculty Gradebook Entries
 export const ciaGradeEntries = pgTable(
   'cia_grade_entries',
   {
-    id: uuid('id').defaultRandom().primaryKey(),
-    offeringId: uuid('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
-    studentId: uuid('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
+    id: text('id').primaryKey(),
+    offeringId: text('offering_id').notNull().references(() => courseOfferings.id, { onDelete: 'cascade' }),
+    studentId: text('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
     component: text('component').notNull(), // QUIZ_1, ASSIGNMENT_1, MID_TERM, etc.
     maxMarks: numeric('max_marks', { precision: 5, scale: 2 }).notNull(),
     obtainedMarks: numeric('obtained_marks', { precision: 5, scale: 2 }).notNull(),
     isManualOverride: boolean('is_manual_override').notNull().default(false),
-    overriddenByUserId: uuid('overridden_by_user_id').references(() => users.id),
+    overriddenByUserId: text('overridden_by_user_id').references(() => users.id),
     overrideReason: text('override_reason'),
     locked: boolean('locked').notNull().default(false),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -450,8 +451,8 @@ export const ciaGradeEntries = pgTable(
 
 // 32. Multi-Channel Notifications
 export const notifications = pgTable('notifications', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   body: text('body').notNull(),
   category: text('category').notNull(), // ACADEMIC, EXAM, ATTENDANCE_ALERT, etc.
@@ -465,8 +466,8 @@ export const notifications = pgTable('notifications', {
 
 // 33. VAPID Web Push Subscriptions
 export const pushSubscriptions = pgTable('push_subscriptions', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   endpoint: text('endpoint').notNull().unique(),
   p256dhKey: text('p256dh_key').notNull(),
   authKey: text('auth_key').notNull(),
@@ -476,7 +477,7 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
 
 // 34. Academic Terms
 export const academicTerms = pgTable('academic_terms', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: text('id').primaryKey(),
   name: text('name').notNull(),
   academicYear: text('academic_year').notNull(),
   semesterType: text('semester_type').notNull(), // ODD, EVEN, SUMMER
@@ -491,8 +492,8 @@ export const academicTerms = pgTable('academic_terms', {
 
 // 35. Academic Calendar Events
 export const calendarEvents = pgTable('calendar_events', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  termId: uuid('term_id').notNull().references(() => academicTerms.id, { onDelete: 'cascade' }),
+  id: text('id').primaryKey(),
+  termId: text('term_id').notNull().references(() => academicTerms.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   eventType: text('event_type').notNull(), // HOLIDAY, EXAMINATION, etc.
   startDate: timestamp('start_date', { withTimezone: true }).notNull(),
@@ -504,9 +505,9 @@ export const calendarEvents = pgTable('calendar_events', {
 export const studentGuardians = pgTable(
   'student_guardians',
   {
-    id: uuid('id').defaultRandom().primaryKey(),
-    studentId: uuid('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
-    guardianUserId: uuid('guardian_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    id: text('id').primaryKey(),
+    studentId: text('student_id').notNull().references(() => studentProfiles.id, { onDelete: 'cascade' }),
+    guardianUserId: text('guardian_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     relationship: text('relationship').notNull(), // FATHER, MOTHER, LEGAL_GUARDIAN, etc.
     isPrimaryContact: boolean('is_primary_contact').notNull().default(false),
     permissions: jsonb('permissions').notNull(),
@@ -515,6 +516,45 @@ export const studentGuardians = pgTable(
   },
   (table: any) => [
     uniqueIndex('student_guardians_unique_idx').on(table.studentId, table.guardianUserId),
+  ]
+);
+
+// 38. Course Waitlist Entries
+export const waitlistEntries = pgTable('waitlist_entries', {
+  id: text('id').primaryKey(),
+  studentId: text('student_id').notNull(),
+  offeringId: text('offering_id').notNull(),
+  position: integer('position').notNull(),
+  reservedUntil: timestamp('reserved_until', { withTimezone: true }),
+});
+
+// 39. Mentor Early-Intervention Cases (ARS)
+export const mentorInterventionCases = pgTable('mentor_intervention_cases', {
+  id: text('id').primaryKey(),
+  studentId: text('student_id').notNull(),
+  mentorId: text('mentor_id').notNull(),
+  riskScore: numeric('risk_score', { precision: 5, scale: 2 }).notNull(),
+  caseStatus: text('case_status').notNull().default('OPEN'),
+  actionNotes: text('action_notes'),
+  slaDeadline: timestamp('sla_deadline', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// 40. Academic Bank of Credits (ABC) / DigiLocker NAD Records
+export const abcCreditRecords = pgTable(
+  'abc_credit_records',
+  {
+    id: text('id').primaryKey(),
+    studentId: text('student_id').notNull(),
+    apaarId: text('apaar_id').notNull(),
+    courseId: text('course_id').notNull(),
+    academicYear: text('academic_year').notNull(),
+    creditsEarned: integer('credits_earned').notNull(),
+    gradeObtained: text('grade_obtained').notNull(),
+    status: text('status').notNull().default('SYNCED'),
+  },
+  (table: any) => [
+    uniqueIndex('abc_credit_records_unique_idx').on(table.apaarId, table.courseId),
   ]
 );
 

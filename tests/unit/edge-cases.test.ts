@@ -125,7 +125,7 @@ export async function runEdgeCaseTests(): Promise<void> {
   console.log('Edge Test 6: Deadlock Prevention under Circular Concurrency');
   const cA = 'crs-uuid-0001';
   const cB = 'crs-uuid-0002';
-  db.courseOfferings.set(cA, {
+  await db.courseOfferings.set(cA, {
     id: cA,
     courseId: 'crs-1',
     semester: 1,
@@ -136,7 +136,7 @@ export async function runEdgeCaseTests(): Promise<void> {
     section: 'A',
     waitlistCount: 0,
   });
-  db.courseOfferings.set(cB, {
+  await db.courseOfferings.set(cB, {
     id: cB,
     courseId: 'crs-2',
     semester: 1,
@@ -180,7 +180,7 @@ export async function runEdgeCaseTests(): Promise<void> {
   const txOld = `order_edge_old_${now}`;
 
   // txYoung: 4m 50s old (should NOT be swept)
-  db.paymentTransactions.set(txYoung, {
+  await db.paymentTransactions.set(txYoung, {
     id: `tx-${txYoung}`,
     studentId: 'stu-profile-01',
     feeStructureId: 'fee-struct-01',
@@ -194,7 +194,7 @@ export async function runEdgeCaseTests(): Promise<void> {
   });
 
   // txOld: 5m 10s old (MUST be swept)
-  db.paymentTransactions.set(txOld, {
+  await db.paymentTransactions.set(txOld, {
     id: `tx-${txOld}`,
     studentId: 'stu-profile-01',
     feeStructureId: 'fee-struct-01',
@@ -208,8 +208,8 @@ export async function runEdgeCaseTests(): Promise<void> {
   });
 
   const pollerReport = await autoHealingPaymentPoller.runReconciliationSweep();
-  const youngAfter = db.paymentTransactions.get(txYoung);
-  const oldAfter = db.paymentTransactions.get(txOld);
+  const youngAfter = await db.paymentTransactions.get(txYoung);
+  const oldAfter = await db.paymentTransactions.get(txOld);
 
   assert.strictEqual(youngAfter?.status, 'PENDING', 'Transaction <5m old must remain PENDING');
   assert.strictEqual(oldAfter?.status, 'RECONCILED_BY_POLLER', 'Transaction >5m old must be RECONCILED_BY_POLLER');

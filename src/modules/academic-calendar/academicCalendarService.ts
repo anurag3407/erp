@@ -34,7 +34,7 @@ export class AcademicCalendarService {
   /**
    * Create an explicit academic term with registration and grade lock windows
    */
-  createTerm(req: CreateTermRequest): AcademicTerm {
+  async createTerm(req: CreateTermRequest): Promise<AcademicTerm> {
     if (req.startDate >= req.endDate) {
       throw new Error('INVALID_DATES: Term start date must precede end date');
     }
@@ -63,45 +63,46 @@ export class AcademicCalendarService {
       status: req.status || 'ACTIVE',
     };
 
-    db.academicTerms.set(termId, term);
+    await db.academicTerms.set(termId, term);
     return term;
   }
 
   /**
    * Retrieve active academic term
    */
-  getActiveTerm(): AcademicTerm | undefined {
-    return Array.from(db.academicTerms.values()).find((t) => t.status === 'ACTIVE');
+  async getActiveTerm(): Promise<AcademicTerm | undefined> {
+    return (await db.academicTerms.values()).find((t) => t.status === 'ACTIVE');
   }
 
   /**
    * Retrieve term by ID
    */
-  getTerm(termId: string): AcademicTerm | undefined {
+  async getTerm(termId: string): Promise<AcademicTerm | undefined> {
     return db.academicTerms.get(termId);
   }
 
   /**
    * Update term lifecycle status
    */
-  updateTermStatus(termId: string, status: TermStatus): AcademicTerm {
-    const term = db.academicTerms.get(termId);
+  async updateTermStatus(termId: string, status: TermStatus): Promise<AcademicTerm> {
+    const term = await db.academicTerms.get(termId);
     if (!term) {
       throw new Error(`Academic term not found: ${termId}`);
     }
     term.status = status;
+    await db.academicTerms.set(term.id, term);
     return term;
   }
 
   /**
    * Add calendar event to term
    */
-  addCalendarEvent(req: AddCalendarEventRequest): CalendarEvent {
+  async addCalendarEvent(req: AddCalendarEventRequest): Promise<CalendarEvent> {
     if (req.startDate > req.endDate) {
       throw new Error('INVALID_DATES: Event start date must precede or equal end date');
     }
 
-    const term = db.academicTerms.get(req.termId);
+    const term = await db.academicTerms.get(req.termId);
     if (!term) {
       throw new Error(`Academic term not found: ${req.termId}`);
     }
@@ -117,27 +118,27 @@ export class AcademicCalendarService {
       isInstructionalDay: req.isInstructionalDay ?? false,
     };
 
-    db.calendarEvents.set(eventId, event);
+    await db.calendarEvents.set(eventId, event);
     return event;
   }
 
   /**
    * Get all calendar events for a term
    */
-  getEventsForTerm(termId: string): CalendarEvent[] {
-    return Array.from(db.calendarEvents.values()).filter((e) => e.termId === termId);
+  async getEventsForTerm(termId: string): Promise<CalendarEvent[]> {
+    return (await db.calendarEvents.values()).filter((e) => e.termId === termId);
   }
 
   /**
    * Calculate instructional days in a term (UGC/AICTE requires >= 90 instructional days)
    */
-  getInstructionalDays(termId: string): { totalDays: number; instructionalDays: number; holidaysCount: number } {
-    const term = db.academicTerms.get(termId);
+  async getInstructionalDays(termId: string): Promise<{ totalDays: number; instructionalDays: number; holidaysCount: number }> {
+    const term = await db.academicTerms.get(termId);
     if (!term) {
       throw new Error(`Academic term not found: ${termId}`);
     }
 
-    const events = this.getEventsForTerm(termId);
+    const events = await this.getEventsForTerm(termId);
     const holidays = events.filter((e) => e.eventType === 'HOLIDAY');
 
     const totalDays = Math.ceil((term.endDate.getTime() - term.startDate.getTime()) / 86400000);
@@ -168,8 +169,8 @@ export class AcademicCalendarService {
   /**
    * Gatekeeper: Validate whether course registration is open on a given date
    */
-  isRegistrationOpen(termId: string, date: Date = new Date()): { allowed: boolean; reason?: string } {
-    const term = db.academicTerms.get(termId);
+  async isRegistrationOpen(termId: string, date: Date = new Date()): Promise<{ allowed: boolean; reason?: string }> {
+    const term = await db.academicTerms.get(termId);
     if (!term) {
       return { allowed: false, reason: `Academic term not found: ${termId}` };
     }
@@ -198,8 +199,8 @@ export class AcademicCalendarService {
   /**
    * Gatekeeper: Validate whether student can add or drop a course on a given date
    */
-  canAddDropCourse(termId: string, date: Date = new Date()): { allowed: boolean; reason?: string } {
-    const term = db.academicTerms.get(termId);
+  async canAddDropCourse(termId: string, date: Date = new Date()): Promise<{ allowed: boolean; reason?: string }> {
+    const term = await db.academicTerms.get(termId);
     if (!term) {
       return { allowed: false, reason: `Academic term not found: ${termId}` };
     }
@@ -220,8 +221,8 @@ export class AcademicCalendarService {
   /**
    * Gatekeeper: Validate whether faculty can submit or modify grades on a given date
    */
-  isGradeSubmissionOpen(termId: string, date: Date = new Date()): { allowed: boolean; reason?: string } {
-    const term = db.academicTerms.get(termId);
+  async isGradeSubmissionOpen(termId: string, date: Date = new Date()): Promise<{ allowed: boolean; reason?: string }> {
+    const term = await db.academicTerms.get(termId);
     if (!term) {
       return { allowed: false, reason: `Academic term not found: ${termId}` };
     }

@@ -21,7 +21,7 @@ export class InterventionWorkflowEngine {
   /**
    * Process calculated risk indicator and execute automated escalation
    */
-  processRiskIndicator(indicator: StudentRiskIndicator): InterventionWorkflowResult {
+  async processRiskIndicator(indicator: StudentRiskIndicator): Promise<InterventionWorkflowResult> {
     // If risk score < 65, no mentor ticket required
     if (indicator.compositeRiskScore < InterventionWorkflowEngine.HIGH_RISK_THRESHOLD) {
       return {
@@ -31,7 +31,7 @@ export class InterventionWorkflowEngine {
       };
     }
 
-    const student = db.studentProfiles.get(indicator.studentId);
+    const student = await db.studentProfiles.get(indicator.studentId);
     const mentorId = student?.mentorId || 'usr-mentor-01';
 
     const caseId = `case-${crypto.randomUUID()}`;
@@ -49,7 +49,7 @@ export class InterventionWorkflowEngine {
       createdAt: now,
     };
 
-    db.mentorInterventions.set(caseId, interventionCase);
+    await db.mentorInterventions.set(caseId, interventionCase);
     indicator.mentorNotified = true;
 
     return {
@@ -63,14 +63,15 @@ export class InterventionWorkflowEngine {
   /**
    * Faculty mentor logs counseling check-in notes
    */
-  logCounselingNotes(caseId: string, notes: string, resolved: boolean = false): MentorInterventionCase {
-    const caseObj = db.mentorInterventions.get(caseId);
+  async logCounselingNotes(caseId: string, notes: string, resolved: boolean = false): Promise<MentorInterventionCase> {
+    const caseObj = await db.mentorInterventions.get(caseId);
     if (!caseObj) {
       throw new Error(`Intervention case ${caseId} not found`);
     }
 
     caseObj.actionNotes = `${caseObj.actionNotes || ''}\n[${new Date().toISOString()}] ${notes}`;
     caseObj.caseStatus = resolved ? 'RESOLVED' : 'IN_COUNSELING';
+    await db.mentorInterventions.set(caseId, caseObj);
     return caseObj;
   }
 }

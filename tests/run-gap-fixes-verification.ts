@@ -10,9 +10,13 @@ import { runEdgeCaseTests } from './unit/edge-cases.test.js';
 import { runIntegrationTests } from './integration/concurrency.test.js';
 import { runE2EWorkflowTests } from './e2e/e2e-workflow.test.js';
 import { runGapVerificationScanner } from './gap-scanner.js';
+import { resetDatabase } from '../src/db/seed.js';
 
 async function main() {
   const masterStart = performance.now();
+
+  // Start from a clean, freshly-seeded PostgreSQL state.
+  await resetDatabase();
 
   console.log('╔════════════════════════════════════════════════════════════════════════════╗');
   console.log('║       ENTERPRISE COLLEGE ERP v2.0 - MASTER VERIFICATION HARNESS            ║');

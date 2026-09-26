@@ -37,7 +37,7 @@ export class AttendanceService {
   /**
    * Atomically mark attendance after verifying dynamic QR, geofence, and WebAuthn
    */
-  markAttendance(req: MarkAttendanceRequest): MarkAttendanceResult {
+  async markAttendance(req: MarkAttendanceRequest): Promise<MarkAttendanceResult> {
     const now = req.timestampMs || Date.now();
 
     // 1. Dynamic QR Token Verification (10-second rolling window)
@@ -65,7 +65,7 @@ export class AttendanceService {
 
     // 3. WebAuthn Biometric Hardware Binding (if provided)
     if (req.credentialId && req.clientDataJSON && req.biometricSignature) {
-      const bioCheck = webAuthnBindingService.verifyBiometricAssertion(
+      const bioCheck = await webAuthnBindingService.verifyBiometricAssertion(
         req.studentId,
         req.credentialId,
         req.clientDataJSON,
@@ -83,7 +83,7 @@ export class AttendanceService {
 
     // 4. Duplicate Check: Prevent marking multiple times for the same lecture session on the same day
     const sessionDateStr = new Date(now).toISOString().split('T')[0];
-    const duplicate = Array.from(db.attendanceRecords.values()).find(
+    const duplicate = (await db.attendanceRecords.values()).find(
       (r) =>
         r.studentId === req.studentId &&
         r.offeringId === req.offeringId &&
@@ -112,7 +112,7 @@ export class AttendanceService {
       distanceMeters: geoCheck.distanceMeters,
       deviceId: req.credentialId,
     };
-    db.attendanceRecords.set(recordId, newRecord);
+    await db.attendanceRecords.set(recordId, newRecord);
 
     return {
       success: true,

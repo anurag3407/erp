@@ -21,8 +21,8 @@ export class WaitlistService {
   /**
    * Add student to waitlist
    */
-  addToWaitlist(studentId: string, offeringId: string): WaitlistEntry {
-    const existingEntries = Array.from(db.waitlists.values()).filter(
+  async addToWaitlist(studentId: string, offeringId: string): Promise<WaitlistEntry> {
+    const existingEntries = (await db.waitlists.values()).filter(
       (w) => w.offeringId === offeringId
     );
     const existing = existingEntries.find((w) => w.studentId === studentId);
@@ -45,11 +45,12 @@ export class WaitlistService {
       offeringId,
       position,
     };
-    db.waitlists.set(id, entry);
+    await db.waitlists.set(id, entry);
 
-    const offering = db.courseOfferings.get(offeringId);
+    const offering = await db.courseOfferings.get(offeringId);
     if (offering) {
       offering.waitlistCount = position;
+      await db.courseOfferings.set(offering.id, offering);
     }
 
     return {
@@ -66,8 +67,8 @@ export class WaitlistService {
    * Grants 2-hour reservation window
    */
   async escalateNextStudent(offeringId: string): Promise<WaitlistEntry | null> {
-    const entries = Array.from(db.waitlists.values())
-      .filter((w) => w.offeringId === offeringId && (!w.reservedUntil || new Date() > w.reservedUntil))
+    const entries = (await db.waitlists.values())
+      .filter((w) => w.offeringId === offeringId && (!w.reservedUntil || new Date() > new Date(w.reservedUntil)))
       .sort((a, b) => a.position - b.position);
 
     if (entries.length === 0) {
@@ -77,6 +78,7 @@ export class WaitlistService {
     const nextStudent = entries[0];
     const twoHoursFromNow = new Date(Date.now() + 2 * 60 * 60 * 1000);
     nextStudent.reservedUntil = twoHoursFromNow;
+    await db.waitlists.set(nextStudent.id, nextStudent);
 
     // Place a 2-hour (7200s) hold in seatEngine for the student
     await seatEngine.reserveSeat(offeringId, nextStudent.studentId, 7200);

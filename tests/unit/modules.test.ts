@@ -99,7 +99,7 @@ export async function runUnitTests(): Promise<void> {
 
   // 4. Curriculum DAG Engine
   console.log('Test 1.4: Curriculum DAG & Cycle Detection');
-  const courses = Array.from(db.courses.values());
+  const courses = await db.courses.values();
   curriculumDagEngine.buildGraph(courses);
   assert.strictEqual(curriculumDagEngine.hasCycle(), false, 'Curriculum DAG must be acyclic');
 
@@ -131,7 +131,7 @@ export async function runUnitTests(): Promise<void> {
 
   // 6. Sub-100ms What-If Major/Minor Simulator
   console.log('Test 1.6: Sub-100ms What-If Major/Minor Simulator');
-  const targetCourses = Array.from(db.courses.values());
+  const targetCourses = await db.courses.values();
   const simulation = whatIfSimulator.simulateProgramSwitch(
     'prog-btech-cse',
     'prog-btech-ai-ds',
@@ -257,13 +257,13 @@ export async function runUnitTests(): Promise<void> {
 
   // 11. 48-Hour Provisional Hall Ticket
   console.log('Test 1.11: 48-Hour Provisional Hall Ticket Validation');
-  const provisionalPass = provisionalHallTicketService.issueProvisionalPass({
+  const provisionalPass = await provisionalHallTicketService.issueProvisionalPass({
     studentId: 'stu-profile-01',
     examId: 'exam-endsem-2026',
     utrReferenceNumber: 'UTR_BANK_PENDING_123',
     grantedByUserId: 'usr-admin-01',
   });
-  const gateCheck = provisionalHallTicketService.validatePassAtGate(provisionalPass.id);
+  const gateCheck = await provisionalHallTicketService.validatePassAtGate(provisionalPass.id);
   assert.strictEqual(gateCheck.isValid, true, 'Provisional pass must admit student at gate');
   assert.ok(gateCheck.remainingHours > 47 && gateCheck.remainingHours <= 48);
   console.log(`  ✓ 48-Hour Provisional Pass Admitted (Remaining grace: ${gateCheck.remainingHours}h)`);
@@ -310,14 +310,14 @@ export async function runUnitTests(): Promise<void> {
   assert.strictEqual(highRiskScore.riskLevel, 'HIGH');
   assert.strictEqual(highRiskScore.mentorNotified, true);
 
-  const escalation = interventionWorkflowEngine.processRiskIndicator(highRiskScore);
+  const escalation = await interventionWorkflowEngine.processRiskIndicator(highRiskScore);
   assert.strictEqual(escalation.ticketCreated, true, 'Intervention case must be generated');
   assert.strictEqual(escalation.parentNotificationSent, true, 'Parent notification must be triggered');
   console.log(`  ✓ ARS Score: ${highRiskScore.compositeRiskScore} (Tier: ${highRiskScore.riskLevel}, 7-Day SLA Ticket Provisioned)`);
 
   // 14. 1-Click NAAC SSR Telemetry & Export
   console.log('Test 1.14: NAAC Telemetry & 1-Click SSR Generator');
-  const ssr = ssrExporterService.exportSsr('2025-2026');
+  const ssr = await ssrExporterService.exportSsr('2025-2026');
   assert.ok(ssr.generationDurationMs < 60000, 'SSR generation must be <60s');
   assert.ok(ssr.tables.length >= 7, 'Must export at least 7 criteria tables');
   assert.ok(ssr.csvData.includes('Student to Full-Time Faculty Ratio'), 'CSV must contain STR');
@@ -350,7 +350,7 @@ export async function runUnitTests(): Promise<void> {
   webAuthnBindingService.registerDevice('stu-att-01', 'cred-device-01', 'pubkey-device-01', 'Pixel 8');
 
   // Mark attendance successfully
-  const attRes = attendanceService.markAttendance({
+  const attRes = await attendanceService.markAttendance({
     studentId: 'stu-att-01',
     offeringId: 'off-att-test',
     token: qrTokenObj.token,

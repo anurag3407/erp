@@ -24,7 +24,7 @@ export class FacultyGradebookService {
    * Save or update an individual grade entry
    * Sets isManualOverride flag to protect against automated LMS sync overwrites
    */
-  saveGradeEntry(req: SaveGradeEntryRequest): CiaGradeEntry {
+  async saveGradeEntry(req: SaveGradeEntryRequest): Promise<CiaGradeEntry> {
     if (this.lockedOfferings.has(req.offeringId)) {
       throw new Error(`GRADEBOOK_LOCKED: Offering ${req.offeringId} gradebook is locked for the semester`);
     }
@@ -36,7 +36,7 @@ export class FacultyGradebookService {
     }
 
     const key = `${req.offeringId}:${req.studentId}:${req.component}`;
-    let entry = db.ciaGradeEntries.get(key);
+    let entry = await db.ciaGradeEntries.get(key);
 
     const isManualOverride = req.isManualOverride !== undefined ? req.isManualOverride : true;
 
@@ -61,27 +61,27 @@ export class FacultyGradebookService {
         locked: false,
         updatedAt: new Date(),
       };
-      db.ciaGradeEntries.set(key, entry);
     }
 
+    await db.ciaGradeEntries.set(key, entry);
     return entry;
   }
 
   /**
    * Bulk upsert grades from spreadsheet grid
    */
-  bulkUpsertGrades(
+  async bulkUpsertGrades(
     offeringId: string,
     entries: BulkGradeUpsertItem[],
     facultyUserId: string
-  ): { savedCount: number; entries: CiaGradeEntry[] } {
+  ): Promise<{ savedCount: number; entries: CiaGradeEntry[] }> {
     if (this.lockedOfferings.has(offeringId)) {
       throw new Error(`GRADEBOOK_LOCKED: Offering ${offeringId} gradebook is locked for the semester`);
     }
 
     const saved: CiaGradeEntry[] = [];
     for (const item of entries) {
-      const entry = this.saveGradeEntry({
+      const entry = await this.saveGradeEntry({
         offeringId,
         studentId: item.studentId,
         component: item.component,
@@ -101,16 +101,16 @@ export class FacultyGradebookService {
    * Check if a grade is manually overridden by faculty
    * Used by LMS sync worker to avoid overwriting faculty manual assessments
    */
-  isGradeOverridden(offeringId: string, studentId: string, component?: string): boolean {
+  async isGradeOverridden(offeringId: string, studentId: string, component?: string): Promise<boolean> {
     if (component) {
       const key = `${offeringId}:${studentId}:${component}`;
-      const directEntry = db.ciaGradeEntries.get(key);
+      const directEntry = await db.ciaGradeEntries.get(key);
       if (directEntry && directEntry.isManualOverride) {
         return true;
       }
 
       const normComponent = component.toUpperCase().replace(/[-_\s]/g, '');
-      for (const e of db.ciaGradeEntries.values()) {
+      for (const e of await db.ciaGradeEntries.values()) {
         if (e.offeringId === offeringId && e.studentId === studentId && e.isManualOverride) {
           const normEntryComp = e.component.toUpperCase().replace(/[-_\s]/g, '');
           if (normEntryComp === normComponent) {
@@ -135,7 +135,7 @@ export class FacultyGradebookService {
     }
 
     // Check if any component for this student in this offering has manual override
-    for (const entry of db.ciaGradeEntries.values()) {
+    for (const entry of await db.ciaGradeEntries.values()) {
       if (entry.offeringId === offeringId && entry.studentId === studentId && entry.isManualOverride) {
         return true;
       }
@@ -147,15 +147,15 @@ export class FacultyGradebookService {
   /**
    * Get specific grade entry
    */
-  getGradeEntry(offeringId: string, studentId: string, component: string): CiaGradeEntry | undefined {
+  async getGradeEntry(offeringId: string, studentId: string, component: string): Promise<CiaGradeEntry | undefined> {
     return db.ciaGradeEntries.get(`${offeringId}:${studentId}:${component}`);
   }
 
   /**
    * Retrieve full gradebook spreadsheet for course offering
    */
-  getGradebookSpreadsheet(offeringId: string): GradebookSpreadsheet {
-    const offeringEntries = Array.from(db.ciaGradeEntries.values()).filter(
+  async getGradebookSpreadsheet(offeringId: string): Promise<GradebookSpreadsheet> {
+    const offeringEntries = (await db.ciaGradeEntries.values()).filter(
       (e) => e.offeringId === offeringId
     );
 
@@ -201,11 +201,12 @@ export class FacultyGradebookService {
   /**
    * Lock gradebook after term grade lock deadline
    */
-  lockGradebook(offeringId: string, facultyUserId: string): { offeringId: string; locked: boolean } {
+  async lockGradebook(offeringId: string, _facultyUserId: string): Promise<{ offeringId: string; locked: boolean }> {
     this.lockedOfferings.add(offeringId);
-    for (const entry of db.ciaGradeEntries.values()) {
+    for (const entry of await db.ciaGradeEntries.values()) {
       if (entry.offeringId === offeringId) {
         entry.locked = true;
+        await db.ciaGradeEntries.set(`${entry.offeringId}:${entry.studentId}:${entry.component}`, entry);
       }
     }
     return { offeringId, locked: true };
@@ -214,11 +215,12 @@ export class FacultyGradebookService {
   /**
    * Unlock gradebook (Super Admin / Dean authorization)
    */
-  unlockGradebook(offeringId: string): { offeringId: string; locked: boolean } {
+  async unlockGradebook(offeringId: string): Promise<{ offeringId: string; locked: boolean }> {
     this.lockedOfferings.delete(offeringId);
-    for (const entry of db.ciaGradeEntries.values()) {
+    for (const entry of await db.ciaGradeEntries.values()) {
       if (entry.offeringId === offeringId) {
         entry.locked = false;
+        await db.ciaGradeEntries.set(`${entry.offeringId}:${entry.studentId}:${entry.component}`, entry);
       }
     }
     return { offeringId, locked: false };

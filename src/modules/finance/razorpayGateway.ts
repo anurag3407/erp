@@ -44,7 +44,7 @@ export class RazorpayGatewayService {
 
     // Persist pending transaction
     const txId = `tx-${crypto.randomUUID()}`;
-    db.paymentTransactions.set(orderId, {
+    await db.paymentTransactions.set(orderId, {
       id: txId,
       studentId: req.studentId,
       feeStructureId: req.feeStructureId,

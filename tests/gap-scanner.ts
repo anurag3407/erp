@@ -62,7 +62,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
   console.log('Scanning Gap 1: Concurrency Crashes during Course Add/Drop...');
   const g1Seats = 10;
   const g1Offering = 'off-gap1-test';
-  db.courseOfferings.set(g1Offering, {
+  await db.courseOfferings.set(g1Offering, {
     id: g1Offering,
     courseId: 'crs-cse-301',
     semester: 4,
@@ -121,7 +121,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
   const g3Nep = nepMilestoneService.evaluateStudentMilestones(125);
   assert.strictEqual(g3Nep.currentEligibleTier.milestoneName, 'DEGREE');
 
-  const g3Courses = Array.from(db.courses.values());
+  const g3Courses = await db.courses.values();
   const g3WhatIf = whatIfSimulator.simulateProgramSwitch('prog-1', 'prog-2', [g3Courses[0]], g3Courses, 160);
   assert.ok(g3WhatIf.simulationTimeMs < 100);
 
@@ -165,13 +165,13 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
 
   // GAP 5: Fee Reconciliation "Payment-Deducted, Hall-Ticket-Blocked"
   console.log('Scanning Gap 5: Fee Collection & 48h Provisional Hall Ticket...');
-  const g5Pass = provisionalHallTicketService.issueProvisionalPass({
+  const g5Pass = await provisionalHallTicketService.issueProvisionalPass({
     studentId: 'stu-profile-01',
     examId: 'exam-g5',
     utrReferenceNumber: 'UTR-G5-EMERGENCY',
     grantedByUserId: 'usr-admin-01',
   });
-  const g5Gate = provisionalHallTicketService.validatePassAtGate(g5Pass.id);
+  const g5Gate = await provisionalHallTicketService.validatePassAtGate(g5Pass.id);
   assert.strictEqual(g5Gate.isValid, true);
 
   reports.push({
@@ -219,7 +219,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
 
   // GAP 7: Six-Month NAAC / NBA Accreditation Panic
   console.log('Scanning Gap 7: Continuous Accreditation Telemetry...');
-  const g7Ssr = ssrExporterService.exportSsr('2025-2026');
+  const g7Ssr = await ssrExporterService.exportSsr('2025-2026');
   assert.ok(g7Ssr.generationDurationMs < 60000);
   assert.ok(g7Ssr.tables.length >= 7);
 
@@ -235,7 +235,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
 
   // GAP 8: Disconnected LMS vs. ERP Silos
   console.log('Scanning Gap 8: LMS vs. ERP Silo Disconnect...');
-  const g8Sync = gradeSyncWorker.syncLmsScores([
+  const g8Sync = await gradeSyncWorker.syncLmsScores([
     {
       studentId: 'stu-profile-01',
       activityId: 'quiz-gap8',
@@ -266,7 +266,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
     lmsInactivityDays: 14,
     hasFeeDues: true,
   });
-  const g9Action = interventionWorkflowEngine.processRiskIndicator(g9Ars);
+  const g9Action = await interventionWorkflowEngine.processRiskIndicator(g9Ars);
   assert.strictEqual(g9Action.ticketCreated, true);
 
   reports.push({
@@ -308,7 +308,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
 
   // GAP 11: Student & Faculty Leave Management
   console.log('Scanning Gap 11: Student & Faculty Leave Management...');
-  const g11Od = leaveService.applyStudentLeave({
+  const g11Od = await leaveService.applyStudentLeave({
     studentId: 'stu-profile-01',
     leaveType: 'ON_DUTY',
     startDate: '2025-11-10',
@@ -316,8 +316,8 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
     reason: 'Inter-University Robotics Competition',
     isOnDuty: true,
   });
-  leaveService.approveByMentor(g11Od.id, 'usr-mentor-01');
-  const g11Hod = leaveService.approveByHod(g11Od.id, 'usr-hod-01');
+  await leaveService.approveByMentor(g11Od.id, 'usr-mentor-01');
+  const g11Hod = await leaveService.approveByHod(g11Od.id, 'usr-hod-01');
   assert.ok(g11Hod.onDutyPass);
   reports.push({
     gapNumber: 11,
@@ -332,7 +332,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
   // GAP 12: Attendance Overrides & Audit Log
   console.log('Scanning Gap 12: Attendance Overrides & Audit Log...');
   const g12AttId = 'att-gap12-test';
-  db.attendanceRecords.set(g12AttId, {
+  await db.attendanceRecords.set(g12AttId, {
     id: g12AttId,
     studentId: 'stu-profile-01',
     offeringId: 'offering-cs301-s1',
@@ -340,7 +340,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
     status: 'ABSENT',
     verificationMethod: 'DYNAMIC_QR',
   });
-  const g12Override = attendanceOverrideService.overrideAttendance({
+  const g12Override = await attendanceOverrideService.overrideAttendance({
     attendanceRecordId: g12AttId,
     newStatus: 'PRESENT',
     reasonCode: 'ON_DUTY_APPROVED',
@@ -350,7 +350,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
     linkedLeaveApplicationId: g11Od.id,
   });
   assert.strictEqual(g12Override.updatedRecord.status, 'PRESENT');
-  db.attendanceRecords.delete(g12AttId);
+  await db.attendanceRecords.delete(g12AttId);
   reports.push({
     gapNumber: 12,
     gapTitle: 'Attendance Overrides & Immutable Audit Log',
@@ -363,8 +363,8 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
 
   // GAP 13: Course Feedback & Statutory Grievance Redressal
   console.log('Scanning Gap 13: Course Feedback & Statutory Grievance Redressal...');
-  const g13Naac = feedbackService.computeNaacMetric14('2025-2026');
-  const g13Grv = grievanceService.fileGrievance({
+  const g13Naac = await feedbackService.computeNaacMetric14('2025-2026');
+  const g13Grv = await grievanceService.fileGrievance({
     complainantId: 'usr-stu-01',
     category: 'ANTI_RAGGING',
     title: 'Zero-Tolerance Anti-Ragging Verification',
@@ -383,7 +383,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
 
   // GAP 14: Library Management
   console.log('Scanning Gap 14: Library Management & 48h Provisional Pass Gate...');
-  const g14Book = libraryService.addBook({
+  const g14Book = await libraryService.addBook({
     isbn: '978-0132350884',
     title: 'Clean Code: A Handbook of Agile Software Craftsmanship',
     author: 'Robert C. Martin',
@@ -391,9 +391,9 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
     callNumber: 'QA76.76.D47 M37 2008',
     totalCopies: 1,
   });
-  const g14Loan = libraryService.issueBook(g14Book.id, 'stu-profile-01', 14);
-  const g14LateDate = new Date(g14Loan.dueDate.getTime() + 4 * 86400000);
-  const { fineTransaction: g14Fine } = libraryService.returnBook(g14Loan.id, g14LateDate);
+  const g14Loan = await libraryService.issueBook(g14Book.id, 'stu-profile-01', 14);
+  const g14LateDate = new Date(new Date(g14Loan.dueDate).getTime() + 4 * 86400000);
+  const { fineTransaction: g14Fine } = await libraryService.returnBook(g14Loan.id, g14LateDate);
   assert.strictEqual(g14Fine?.amount, 20.0);
   assert.strictEqual(g14Fine?.feeStructureId, 'fee-struct-lib-fine');
   assert.strictEqual(g14Fine?.feeHead, 'LIBRARY_FINE', 'Fine transaction must have feeHead LIBRARY_FINE');
@@ -410,7 +410,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
   // GAP 15: Direct CIA Faculty Gradebook
   console.log('Scanning Gap 15: Direct CIA Faculty Gradebook & LTI Override Protection...');
   const g15Offering = 'offering-gap15-test';
-  db.courseOfferings.set(g15Offering, {
+  await db.courseOfferings.set(g15Offering, {
     id: g15Offering,
     courseId: 'crs-cse-301',
     semester: 4,
@@ -421,7 +421,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
     section: 'A',
     waitlistCount: 0,
   });
-  facultyGradebookService.saveGradeEntry({
+  await facultyGradebookService.saveGradeEntry({
     offeringId: g15Offering,
     studentId: 'stu-profile-01',
     component: 'MID_TERM',
@@ -430,7 +430,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
     facultyUserId: 'usr-fac-01',
     isManualOverride: true,
   });
-  const g15Sync = gradeSyncWorker.syncLmsScores([
+  const g15Sync = await gradeSyncWorker.syncLmsScores([
     {
       studentId: 'stu-profile-01',
       offeringId: g15Offering,
@@ -441,7 +441,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
     },
   ]);
   assert.strictEqual(g15Sync.skippedOverrideCount, 1);
-  db.courseOfferings.delete(g15Offering);
+  await db.courseOfferings.delete(g15Offering);
   reports.push({
     gapNumber: 15,
     gapTitle: 'Direct CIA Gradebook & LTI Manual Override Preservation',
@@ -456,7 +456,7 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
   console.log('Scanning Gap 16: Multi-Channel Notification Center & VAPID Web Push...');
   const g16Vapid = notificationCenter.generateVapidKeys();
   assert.ok(g16Vapid.publicKey.length > 30);
-  const g16Broadcast = notificationCenter.broadcastToCohort(
+  const g16Broadcast = await notificationCenter.broadcastToCohort(
     { role: 'STUDENT' },
     { title: 'Scanner Test Notification', body: 'Campus audit in progress' }
   );
@@ -473,10 +473,10 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
 
   // GAP 17: Academic Terms & Calendar
   console.log('Scanning Gap 17: Academic Terms & Calendar Enforcement...');
-  const g17ActiveTerm = academicCalendarService.getActiveTerm();
+  const g17ActiveTerm = await academicCalendarService.getActiveTerm();
   assert.ok(g17ActiveTerm);
   const g17During = new Date('2025-08-01T00:00:00Z');
-  const g17RegCheck = academicCalendarService.isRegistrationOpen(g17ActiveTerm.id, g17During);
+  const g17RegCheck = await academicCalendarService.isRegistrationOpen(g17ActiveTerm!.id, g17During);
   assert.strictEqual(g17RegCheck.allowed, true);
   reports.push({
     gapNumber: 17,
@@ -490,14 +490,14 @@ export async function runGapVerificationScanner(): Promise<GapAuditReport[]> {
 
   // GAP 18: Parent-Student Guardianship Association
   console.log('Scanning Gap 18: Parent-Student Guardianship Association...');
-  const g18Link = guardianshipService.linkGuardian({
+  const g18Link = await guardianshipService.linkGuardian({
     studentId: 'stu-profile-01',
     guardianUserId: 'usr-parent-01',
     relationship: 'MOTHER',
     permissions: { canViewAttendance: true, canViewGrades: true },
   });
   assert.strictEqual(g18Link.relationship, 'MOTHER');
-  assert.strictEqual(guardianshipService.checkGuardianPermission('usr-parent-01', 'stu-profile-01', 'canViewGrades'), true);
+  assert.strictEqual(await guardianshipService.checkGuardianPermission('usr-parent-01', 'stu-profile-01', 'canViewGrades'), true);
   reports.push({
     gapNumber: 18,
     gapTitle: 'Parent-Student Guardianship Association',

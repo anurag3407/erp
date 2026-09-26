@@ -45,7 +45,7 @@ export class GrievanceService {
   /**
    * File a formal statutory grievance
    */
-  fileGrievance(req: FileGrievanceRequest): GrievanceTicket {
+  async fileGrievance(req: FileGrievanceRequest): Promise<GrievanceTicket> {
     const ticketId = `grv-${crypto.randomUUID()}`;
     const now = new Date();
     const slaHours = GrievanceService.SLA_HOURS[req.category] || 168;
@@ -71,10 +71,10 @@ export class GrievanceService {
       updatedAt: now,
     };
 
-    db.grievanceTickets.set(ticketId, ticket);
+    await db.grievanceTickets.set(ticketId, ticket);
 
     // Initial action log
-    this.logAction(
+    await this.logAction(
       ticketId,
       'GRIEVANCE_SUBMITTED',
       req.complainantId || 'ANONYMOUS',
@@ -87,7 +87,7 @@ export class GrievanceService {
   /**
    * Record a statutory committee action/hearing in the audit log
    */
-  logAction(ticketId: string, action: string, performedByUserId: string, notes?: string): GrievanceActionLog {
+  async logAction(ticketId: string, action: string, performedByUserId: string, notes?: string): Promise<GrievanceActionLog> {
     const logId = `grv-act-${crypto.randomUUID()}`;
     const log: GrievanceActionLog = {
       id: logId,
@@ -98,20 +98,20 @@ export class GrievanceService {
       timestamp: new Date(),
     };
 
-    db.grievanceActionLogs.set(logId, log);
+    await db.grievanceActionLogs.set(logId, log);
     return log;
   }
 
   /**
    * Update status to investigation or hearing
    */
-  updateStatus(
+  async updateStatus(
     ticketId: string,
     status: GrievanceStatus,
     performedByUserId: string,
     notes?: string
-  ): GrievanceTicket {
-    const ticket = db.grievanceTickets.get(ticketId);
+  ): Promise<GrievanceTicket> {
+    const ticket = await db.grievanceTickets.get(ticketId);
     if (!ticket) {
       throw new Error(`Grievance ticket not found: ${ticketId}`);
     }
@@ -133,15 +133,16 @@ export class GrievanceService {
         : `[${now.toISOString()}] ${notes}`;
     }
 
-    this.logAction(ticketId, `STATUS_CHANGED_TO_${status}`, performedByUserId, notes);
+    await this.logAction(ticketId, `STATUS_CHANGED_TO_${status}`, performedByUserId, notes);
+    await db.grievanceTickets.set(ticket.id, ticket);
     return ticket;
   }
 
   /**
    * Formal resolution of statutory grievance
    */
-  resolveGrievance(ticketId: string, resolvedByUserId: string, resolutionSummary: string): GrievanceTicket {
-    const ticket = db.grievanceTickets.get(ticketId);
+  async resolveGrievance(ticketId: string, resolvedByUserId: string, resolutionSummary: string): Promise<GrievanceTicket> {
+    const ticket = await db.grievanceTickets.get(ticketId);
     if (!ticket) {
       throw new Error(`Grievance ticket not found: ${ticketId}`);
     }
@@ -153,15 +154,16 @@ export class GrievanceService {
     ticket.updatedAt = now;
     ticket.isSlaBreached = now.getTime() > ticket.slaDeadline.getTime();
 
-    this.logAction(ticketId, 'GRIEVANCE_RESOLVED', resolvedByUserId, resolutionSummary);
+    await this.logAction(ticketId, 'GRIEVANCE_RESOLVED', resolvedByUserId, resolutionSummary);
+    await db.grievanceTickets.set(ticket.id, ticket);
     return ticket;
   }
 
   /**
    * Escalate grievance to Executive Dean / Ombudsman
    */
-  escalateGrievance(ticketId: string, escalatedByUserId: string, reason: string): GrievanceTicket {
-    const ticket = db.grievanceTickets.get(ticketId);
+  async escalateGrievance(ticketId: string, escalatedByUserId: string, reason: string): Promise<GrievanceTicket> {
+    const ticket = await db.grievanceTickets.get(ticketId);
     if (!ticket) {
       throw new Error(`Grievance ticket not found: ${ticketId}`);
     }
@@ -169,21 +171,23 @@ export class GrievanceService {
     ticket.status = 'ESCALATED';
     ticket.updatedAt = new Date();
 
-    this.logAction(ticketId, 'ESCALATED_TO_OMBUDSMAN', escalatedByUserId, reason);
+    await this.logAction(ticketId, 'ESCALATED_TO_OMBUDSMAN', escalatedByUserId, reason);
+    await db.grievanceTickets.set(ticket.id, ticket);
     return ticket;
   }
 
   /**
    * Check and update SLA breach status across all open tickets
    */
-  checkSlaBreaches(referenceTime: Date = new Date()): { breachedCount: number; breachedTickets: GrievanceTicket[] } {
+  async checkSlaBreaches(referenceTime: Date = new Date()): Promise<{ breachedCount: number; breachedTickets: GrievanceTicket[] }> {
     const nowMs = referenceTime.getTime();
     const breachedTickets: GrievanceTicket[] = [];
 
-    for (const ticket of db.grievanceTickets.values()) {
+    for (const ticket of await db.grievanceTickets.values()) {
       if (ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED') {
-        if (nowMs > ticket.slaDeadline.getTime()) {
+        if (nowMs > new Date(ticket.slaDeadline).getTime()) {
           ticket.isSlaBreached = true;
+          await db.grievanceTickets.set(ticket.id, ticket);
           breachedTickets.push(ticket);
         }
       }
@@ -198,31 +202,31 @@ export class GrievanceService {
   /**
    * Retrieve action logs for a ticket
    */
-  getActionLogs(ticketId: string): GrievanceActionLog[] {
-    return Array.from(db.grievanceActionLogs.values())
+  async getActionLogs(ticketId: string): Promise<GrievanceActionLog[]> {
+    return (await db.grievanceActionLogs.values())
       .filter((l) => l.ticketId === ticketId)
-      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   }
 
   /**
    * Compute grievance statistics for NAAC Criterion 5 telemetry
    */
-  getGrievanceStats(): {
+  async getGrievanceStats(): Promise<{
     totalTickets: number;
     resolvedTickets: number;
     openTickets: number;
     breachedTickets: number;
     averageResolutionDays: number;
-  } {
-    const all = Array.from(db.grievanceTickets.values());
+  }> {
+    const all = await db.grievanceTickets.values();
     const resolved = all.filter((t) => t.status === 'RESOLVED' || t.status === 'CLOSED');
     const open = all.filter((t) => t.status !== 'RESOLVED' && t.status !== 'CLOSED');
     const breached = all.filter((t) => t.isSlaBreached);
 
     let totalDurationMs = 0;
     for (const r of resolved) {
-      const end = r.resolvedAt ? r.resolvedAt.getTime() : r.updatedAt.getTime();
-      totalDurationMs += end - r.createdAt.getTime();
+      const end = r.resolvedAt ? new Date(r.resolvedAt).getTime() : new Date(r.updatedAt).getTime();
+      totalDurationMs += end - new Date(r.createdAt).getTime();
     }
 
     const averageResolutionDays =

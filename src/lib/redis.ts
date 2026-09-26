@@ -155,13 +155,23 @@ export class InMemoryRedisClient extends EventEmitter {
       const studentId = argv[0];
       const ttl = argv[1] ? parseInt(argv[1], 10) : 300;
 
+      // The real Lua script executes GET + DECR + SETEX atomically. Because this
+      // emulation is synchronous once inside the branch, all four ops must run
+      // without an intervening await — otherwise concurrent reservations all
+      // read the same seat count and over-reserve.
       this.cleanIfExpired(seatsKey);
-      const currentSeatsStr = await this.get(seatsKey);
-      const seats = currentSeatsStr ? parseInt(currentSeatsStr, 10) : 0;
+      const currentEntry = this.store.get(seatsKey);
+      const seats = currentEntry ? parseInt(currentEntry.value, 10) : 0;
 
       if (seats > 0) {
-        await this.decr(seatsKey);
-        await this.setex(reservationKey, isNaN(ttl) ? 300 : ttl, studentId);
+        this.store.set(seatsKey, {
+          value: String(seats - 1),
+          expiresAt: currentEntry?.expiresAt ?? null,
+        });
+        this.store.set(reservationKey, {
+          value: studentId,
+          expiresAt: Date.now() + (isNaN(ttl) ? 300 : ttl) * 1000,
+        });
         return 1;
       }
       return 0;

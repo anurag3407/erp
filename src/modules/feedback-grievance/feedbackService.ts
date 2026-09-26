@@ -29,7 +29,7 @@ export class FeedbackService {
   /**
    * Create a new Likert feedback survey with structured questions
    */
-  createSurvey(req: CreateSurveyRequest): { survey: FeedbackSurvey; questions: FeedbackQuestion[] } {
+  async createSurvey(req: CreateSurveyRequest): Promise<{ survey: FeedbackSurvey; questions: FeedbackQuestion[] }> {
     if (!req.questions || req.questions.length === 0) {
       throw new Error('Survey must contain at least one question');
     }
@@ -47,7 +47,7 @@ export class FeedbackService {
       createdAt: new Date(),
     };
 
-    db.feedbackSurveys.set(surveyId, survey);
+    await db.feedbackSurveys.set(surveyId, survey);
 
     const createdQuestions: FeedbackQuestion[] = [];
     for (const q of req.questions) {
@@ -58,7 +58,7 @@ export class FeedbackService {
         questionText: q.questionText,
         category: q.category,
       };
-      db.feedbackQuestions.set(questionId, question);
+      await db.feedbackQuestions.set(questionId, question);
       createdQuestions.push(question);
     }
 
@@ -68,12 +68,13 @@ export class FeedbackService {
   /**
    * Close an active feedback survey
    */
-  closeSurvey(surveyId: string): FeedbackSurvey {
-    const survey = db.feedbackSurveys.get(surveyId);
+  async closeSurvey(surveyId: string): Promise<FeedbackSurvey> {
+    const survey = await db.feedbackSurveys.get(surveyId);
     if (!survey) {
       throw new Error(`Survey not found: ${surveyId}`);
     }
     survey.status = 'CLOSED';
+    await db.feedbackSurveys.set(survey.id, survey);
     return survey;
   }
 
@@ -81,8 +82,8 @@ export class FeedbackService {
    * Submit 5-point Likert ratings for a survey
    * Enforces 1-5 rating range per NAAC / UGC criteria
    */
-  submitResponse(req: SubmitFeedbackRequest): FeedbackResponse {
-    const survey = db.feedbackSurveys.get(req.surveyId);
+  async submitResponse(req: SubmitFeedbackRequest): Promise<FeedbackResponse> {
+    const survey = await db.feedbackSurveys.get(req.surveyId);
     if (!survey) {
       throw new Error(`Survey not found: ${req.surveyId}`);
     }
@@ -97,7 +98,7 @@ export class FeedbackService {
 
     // Validate 1-5 Likert range and question ownership
     for (const [qId, rating] of Object.entries(req.ratings)) {
-      const q = db.feedbackQuestions.get(qId);
+      const q = await db.feedbackQuestions.get(qId);
       if (!q || q.surveyId !== req.surveyId) {
         throw new Error(`Invalid question ID for survey ${req.surveyId}: ${qId}`);
       }
@@ -117,7 +118,7 @@ export class FeedbackService {
       submittedAt: new Date(),
     };
 
-    db.feedbackResponses.set(responseId, response);
+    await db.feedbackResponses.set(responseId, response);
     return response;
   }
 
@@ -125,13 +126,13 @@ export class FeedbackService {
    * Compute NAAC Metric 1.4: Institutional Feedback System & Analysis
    * Analyzes feedback across students, teachers, employers, and alumni.
    */
-  computeNaacMetric14(academicYear: string = '2025-2026'): NaacMetric14Report {
-    const surveysForYear = Array.from(db.feedbackSurveys.values()).filter(
+  async computeNaacMetric14(academicYear: string = '2025-2026'): Promise<NaacMetric14Report> {
+    const surveysForYear = (await db.feedbackSurveys.values()).filter(
       (s) => s.academicYear === academicYear
     );
     const surveyIds = new Set(surveysForYear.map((s) => s.id));
 
-    const responses = Array.from(db.feedbackResponses.values()).filter((r) =>
+    const responses: FeedbackResponse[] = (await db.feedbackResponses.values()).filter((r) =>
       surveyIds.has(r.surveyId)
     );
 
@@ -149,8 +150,8 @@ export class FeedbackService {
     let positiveRatingsCount = 0; // rating >= 4
 
     for (const resp of responses) {
-      const survey = db.feedbackSurveys.get(resp.surveyId)!;
-      const sh = survey.stakeholderType;
+      const survey = (await db.feedbackSurveys.get(resp.surveyId))!;
+      const sh = survey.stakeholderType as FeedbackStakeholderType;
       stakeholderCounts[sh].count++;
 
       for (const [qId, rating] of Object.entries(resp.ratings)) {
@@ -163,7 +164,7 @@ export class FeedbackService {
           positiveRatingsCount++;
         }
 
-        const q = db.feedbackQuestions.get(qId);
+        const q = await db.feedbackQuestions.get(qId);
         const cat = q?.category || 'CURRICULUM';
         if (!categoryScores[cat]) {
           categoryScores[cat] = { total: 0, count: 0 };
@@ -226,7 +227,7 @@ export class FeedbackService {
     };
 
     // Cache in naacTelemetryCache for Criterion 1 Metric 1.4
-    db.naacCache.set(`naac-1.4-${academicYear}`, {
+    await db.naacCache.set(`naac-1.4-${academicYear}`, {
       academicYear,
       criterionNumber: 1,
       metricCode: '1.4.1_1.4.2_FEEDBACK_SYSTEM',

@@ -39,7 +39,7 @@ export class BiometricWebhookProcessor {
       }
 
       // 2. Find student profile by roll number
-      const student = Array.from(db.studentProfiles.values()).find(
+      const student = (await db.studentProfiles.values()).find(
         (s) => s.rollNumber === event.studentRollNumber
       );
 
@@ -61,7 +61,7 @@ export class BiometricWebhookProcessor {
 
       // 4. Record attendance
       const recordId = `att-bio-${crypto.randomUUID()}`;
-      db.attendanceRecords.set(recordId, {
+      await db.attendanceRecords.set(recordId, {
         id: recordId,
         studentId: student.id,
         offeringId: 'CAMPUS_GATE',

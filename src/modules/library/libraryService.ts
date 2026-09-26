@@ -27,7 +27,7 @@ export class LibraryService {
   /**
    * Add a book to the library catalog
    */
-  addBook(req: AddBookRequest): LibraryBook {
+  async addBook(req: AddBookRequest): Promise<LibraryBook> {
     const bookId = `book-${crypto.randomUUID()}`;
     const book: LibraryBook = {
       id: bookId,
@@ -41,15 +41,15 @@ export class LibraryService {
       departmentId: req.departmentId,
     };
 
-    db.libraryBooks.set(bookId, book);
+    await db.libraryBooks.set(bookId, book);
     return book;
   }
 
   /**
    * Issue a book to a student
    */
-  issueBook(bookId: string, studentId: string, loanDays: number = this.standardLoanPeriodDays): BookLoan {
-    const book = db.libraryBooks.get(bookId);
+  async issueBook(bookId: string, studentId: string, loanDays: number = this.standardLoanPeriodDays): Promise<BookLoan> {
+    const book = await db.libraryBooks.get(bookId);
     if (!book) {
       throw new Error(`Book not found: ${bookId}`);
     }
@@ -58,7 +58,7 @@ export class LibraryService {
       throw new Error(`OUT_OF_STOCK: No copies available for book ${book.title}`);
     }
 
-    const student = db.studentProfiles.get(studentId);
+    const student = await db.studentProfiles.get(studentId);
     if (!student) {
       throw new Error(`Student not found: ${studentId}`);
     }
@@ -66,7 +66,8 @@ export class LibraryService {
     const now = new Date();
 
     // Prevent duplicate borrowing of the same book
-    const existingActiveLoan = Array.from(db.bookLoans.values()).find(
+    const activeLoans = await db.bookLoans.values();
+    const existingActiveLoan = activeLoans.find(
       (l) => l.bookId === bookId && l.studentId === studentId && l.status === 'ISSUED'
     );
     if (existingActiveLoan) {
@@ -74,8 +75,8 @@ export class LibraryService {
     }
 
     // Check if student is blocked due to overdue unreturned books
-    const overdueCount = Array.from(db.bookLoans.values()).filter(
-      (l) => l.studentId === studentId && l.status === 'ISSUED' && now.getTime() > l.dueDate.getTime()
+    const overdueCount = activeLoans.filter(
+      (l) => l.studentId === studentId && l.status === 'ISSUED' && now.getTime() > new Date(l.dueDate).getTime()
     ).length;
     if (overdueCount > 0) {
       throw new Error(`BORROWING_BLOCKED: Student ${studentId} has ${overdueCount} overdue book(s). Return them before borrowing new books.`);
@@ -96,7 +97,8 @@ export class LibraryService {
     };
 
     book.availableCopies -= 1;
-    db.bookLoans.set(loanId, loan);
+    await db.libraryBooks.set(book.id, book);
+    await db.bookLoans.set(loanId, loan);
 
     return loan;
   }
@@ -104,8 +106,8 @@ export class LibraryService {
   /**
    * Renew an issued book
    */
-  renewBook(loanId: string, extensionDays: number = 14): BookLoan {
-    const loan = db.bookLoans.get(loanId);
+  async renewBook(loanId: string, extensionDays: number = 14): Promise<BookLoan> {
+    const loan = await db.bookLoans.get(loanId);
     if (!loan) {
       throw new Error(`Loan record not found: ${loanId}`);
     }
@@ -119,12 +121,13 @@ export class LibraryService {
     }
 
     const now = new Date();
-    if (now.getTime() > loan.dueDate.getTime()) {
+    if (now.getTime() > new Date(loan.dueDate).getTime()) {
       throw new Error('OVERDUE_RENEWAL_BLOCKED: Cannot renew overdue book. Return and settle fines.');
     }
 
-    loan.dueDate = new Date(loan.dueDate.getTime() + extensionDays * 86400000);
+    loan.dueDate = new Date(new Date(loan.dueDate).getTime() + extensionDays * 86400000);
     loan.renewalCount += 1;
+    await db.bookLoans.set(loan.id, loan);
 
     return loan;
   }
@@ -132,8 +135,8 @@ export class LibraryService {
   /**
    * Return a book, calculate overdue fine, and connect to payment_transactions under feeHead 'LIBRARY_FINE'
    */
-  returnBook(loanId: string, returnDate: Date = new Date()): { loan: BookLoan; fineTransaction?: PaymentTransaction } {
-    const loan = db.bookLoans.get(loanId);
+  async returnBook(loanId: string, returnDate: Date = new Date()): Promise<{ loan: BookLoan; fineTransaction?: PaymentTransaction }> {
+    const loan = await db.bookLoans.get(loanId);
     if (!loan) {
       throw new Error(`Loan record not found: ${loanId}`);
     }
@@ -142,9 +145,10 @@ export class LibraryService {
       throw new Error(`Book is already returned: ${loanId}`);
     }
 
-    const book = db.libraryBooks.get(loan.bookId);
+    const book = await db.libraryBooks.get(loan.bookId);
     if (book) {
       book.availableCopies = Math.min(book.totalCopies, book.availableCopies + 1);
+      await db.libraryBooks.set(book.id, book);
     }
 
     loan.returnedAt = returnDate;
@@ -153,8 +157,8 @@ export class LibraryService {
     let fineTransaction: PaymentTransaction | undefined;
 
     // Check overdue
-    if (returnDate.getTime() > loan.dueDate.getTime()) {
-      const daysOverdue = Math.ceil((returnDate.getTime() - loan.dueDate.getTime()) / 86400000);
+    if (returnDate.getTime() > new Date(loan.dueDate).getTime()) {
+      const daysOverdue = Math.ceil((returnDate.getTime() - new Date(loan.dueDate).getTime()) / 86400000);
       const fineAmount = Math.round(daysOverdue * this.finePerDayRupees * 100) / 100;
       loan.overdueFineAmount = fineAmount;
 
@@ -177,10 +181,12 @@ export class LibraryService {
           updatedAt: new Date(),
         };
 
-        db.paymentTransactions.set(orderId, fineTransaction);
+        await db.paymentTransactions.set(orderId, fineTransaction);
         loan.fineTransactionId = fineTransaction.id;
       }
     }
+
+    await db.bookLoans.set(loan.id, loan);
 
     return { loan, fineTransaction };
   }
@@ -189,16 +195,18 @@ export class LibraryService {
    * Check hall ticket clearance against library holds (overdue loans or unpaid fines)
    * Connects to 48-Hour Provisional Hall Ticket gate
    */
-  checkHallTicketClearance(studentId: string, checkDate: Date = new Date()): LibraryHallTicketClearance {
-    const studentLoans = Array.from(db.bookLoans.values()).filter((l) => l.studentId === studentId);
+  async checkHallTicketClearance(studentId: string, checkDate: Date = new Date()): Promise<LibraryHallTicketClearance> {
+    const allLoans = await db.bookLoans.values();
+    const studentLoans = allLoans.filter((l) => l.studentId === studentId);
 
     // Overdue unreturned loans
     const unreturnedLoans = studentLoans.filter(
-      (l) => l.status === 'ISSUED' && checkDate.getTime() > l.dueDate.getTime()
+      (l) => l.status === 'ISSUED' && checkDate.getTime() > new Date(l.dueDate).getTime()
     );
 
     // Unpaid library fine transactions (under feeHead 'LIBRARY_FINE' or fee-struct-lib-fine)
-    const libraryTxs = Array.from(db.paymentTransactions.values()).filter(
+    const allTxs = await db.paymentTransactions.values();
+    const libraryTxs = allTxs.filter(
       (tx) =>
         tx.studentId === studentId &&
         (tx.feeHead === 'LIBRARY_FINE' || tx.feeStructureId === 'fee-struct-lib-fine') &&
@@ -223,17 +231,17 @@ export class LibraryService {
   /**
    * Issue a 48-hour provisional hall ticket for a student blocked by library fines
    */
-  issueProvisionalPassForLibraryHold(
+  async issueProvisionalPassForLibraryHold(
     studentId: string,
     examId: string,
     grantedByUserId: string
-  ): ProvisionalHallTicket {
-    const clearance = this.checkHallTicketClearance(studentId);
+  ): Promise<ProvisionalHallTicket> {
+    const clearance = await this.checkHallTicketClearance(studentId);
     if (clearance.cleared) {
       throw new Error(`Student ${studentId} is already fully cleared in the library. Standard hall ticket applies.`);
     }
 
-    const provisionalPass = provisionalHallTicketService.issueProvisionalPass({
+    const provisionalPass = await provisionalHallTicketService.issueProvisionalPass({
       studentId,
       examId,
       utrReferenceNumber: `LIB-FINE-PASS-${crypto.randomBytes(4).toString('hex').toUpperCase()}`,

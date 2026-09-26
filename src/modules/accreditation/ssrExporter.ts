@@ -24,9 +24,9 @@ export class SsrExporterService {
   /**
    * Export fully populated SSR package in <60 seconds (<100ms actual)
    */
-  exportSsr(academicYear: string = '2025-2026'): SsrExportPackage {
+  async exportSsr(academicYear: string = '2025-2026'): Promise<SsrExportPackage> {
     const startTime = performance.now();
-    const telemetry = naacTelemetryService.computeLiveTelemetry(academicYear);
+    const telemetry = await naacTelemetryService.computeLiveTelemetry(academicYear);
 
     const tables = [
       {

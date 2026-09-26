@@ -36,22 +36,22 @@ export interface ServerActionResponse<T = any> {
 export async function getDashboardData(role: string = "Student"): Promise<ServerActionResponse> {
   try {
     const studentId = "usr-stu-01";
-    const profile = Array.from(db.studentProfiles.values()).find((p) => p.userId === studentId || p.id === studentId);
-    const totalClasses = db.courseOfferings.size;
+    const profile = (await db.studentProfiles.values()).find((p) => p.userId === studentId || p.id === studentId);
+    const totalClasses = await db.courseOfferings.count();
 
-    const pendingFees = Array.from(db.paymentTransactions.values())
+    const pendingFees = (await db.paymentTransactions.values())
       .filter((t) => (t.studentId === studentId || (profile && t.studentId === profile.id)) && t.status === "PENDING")
       .reduce((acc, t) => acc + t.amount, 0);
 
-    const activeLibraryLoans = Array.from(db.bookLoans.values()).filter(
+    const activeLibraryLoans = (await db.bookLoans.values()).filter(
       (l) => (l.studentId === studentId || (profile && l.studentId === profile.id)) && !l.returnedAt
     ).length;
 
-    const activeLeaves = Array.from(db.leaveApplications.values()).filter(
+    const activeLeaves = (await db.leaveApplications.values()).filter(
       (l) => l.applicantId === studentId && l.status !== "REJECTED" && l.status !== "CANCELLED"
     ).length;
 
-    const unreadNotifications = Array.from(db.notifications.values()).filter(
+    const unreadNotifications = (await db.notifications.values()).filter(
       (n) => n.userId === studentId && !n.isRead
     ).length;
 
@@ -81,9 +81,10 @@ export async function getDashboardData(role: string = "Student"): Promise<Server
 // 2. Course Catalog & Enrollment
 export async function getCourseCatalog(): Promise<ServerActionResponse> {
   try {
-    const offerings = Array.from(db.courseOfferings.values()).map((offering) => {
-      const course = db.courses.get(offering.courseId);
-      const faculty = db.users.get(offering.facultyId);
+    const offeringRows = await db.courseOfferings.values();
+    const offerings = await Promise.all(offeringRows.map(async (offering) => {
+      const course = await db.courses.get(offering.courseId);
+      const faculty = await db.users.get(offering.facultyId);
       return {
         id: offering.id,
         courseCode: course?.code || "CS101",
@@ -96,7 +97,7 @@ export async function getCourseCatalog(): Promise<ServerActionResponse> {
         section: offering.section,
         scheduleSlot: "Mon, Wed, Fri (10:00 - 11:00 AM)",
       };
-    });
+    }));
     return { success: true, data: offerings };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -122,8 +123,8 @@ export async function markAttendancePunch(payload?: {
   try {
     const studentId = payload?.studentId || "usr-stu-01";
     const offering = payload?.offeringId
-      ? db.courseOfferings.get(payload.offeringId)
-      : Array.from(db.courseOfferings.values())[0];
+      ? await db.courseOfferings.get(payload.offeringId)
+      : (await db.courseOfferings.values())[0];
 
     if (!offering) return { success: false, error: "No active lecture session found" };
 
@@ -138,7 +139,7 @@ export async function markAttendancePunch(payload?: {
       timestampMs: Date.now(),
     });
 
-    const res = attendanceService.markAttendance(valid);
+    const res = await attendanceService.markAttendance(valid);
     return { success: res.success, data: res, error: res.error };
   } catch (err: any) {
     return { success: false, error: err.message || "Attendance failed" };
@@ -153,10 +154,11 @@ export async function markManualAttendance(studentId: string = "usr-stu-01") {
 // 4. Timetable Schedule
 export async function getTimetableMatrix(): Promise<ServerActionResponse> {
   try {
-    const slots = Array.from(db.timetableSlots.values()).map((slot) => {
-      const offering = db.courseOfferings.get(slot.offeringId);
-      const course = offering ? db.courses.get(offering.courseId) : null;
-      const faculty = db.users.get(slot.facultyId);
+    const slotRows = await db.timetableSlots.values();
+    const slots = await Promise.all(slotRows.map(async (slot) => {
+      const offering = await db.courseOfferings.get(slot.offeringId);
+      const course = offering ? await db.courses.get(offering.courseId) : null;
+      const faculty = await db.users.get(slot.facultyId);
       const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
       return {
         id: slot.id,
@@ -168,7 +170,7 @@ export async function getTimetableMatrix(): Promise<ServerActionResponse> {
         roomCode: slot.roomNumber,
         facultyName: faculty?.name || "Faculty In-Charge",
       };
-    });
+    }));
     return { success: true, data: slots };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -178,12 +180,12 @@ export async function getTimetableMatrix(): Promise<ServerActionResponse> {
 // 5. Degree Audit & What-If Simulation
 export async function getDegreeAudit(studentId: string = "usr-stu-01"): Promise<ServerActionResponse> {
   try {
-    const profile = Array.from(db.studentProfiles.values()).find(
+    const profile = (await db.studentProfiles.values()).find(
       (p) => p.userId === studentId || p.id === studentId
     );
     if (!profile) return { success: false, error: "Student profile not found" };
 
-    const completedCourses: Course[] = Array.from(db.courses.values()).slice(0, 5);
+    const completedCourses: Course[] = ((await db.courses.values()) as Course[]).slice(0, 5);
     const buckets = curriculumDagEngine.auditCreditBuckets(completedCourses);
 
     return {
@@ -210,11 +212,12 @@ export async function getDegreeAudit(studentId: string = "usr-stu-01"): Promise<
 export async function simulateWhatIf(targetProgramId: string, studentId: string = "usr-stu-01"): Promise<ServerActionResponse> {
   try {
     const valid = whatIfSimulationSchema.parse({ targetProgramId, studentId });
-    const profile = Array.from(db.studentProfiles.values()).find((p) => p.userId === valid.studentId || p.id === valid.studentId);
+    const profile = (await db.studentProfiles.values()).find((p) => p.userId === valid.studentId || p.id === valid.studentId);
     if (!profile) return { success: false, error: "Profile not found" };
 
-    const completedCourses: Course[] = Array.from(db.courses.values()).slice(0, 6);
-    const targetProgramCourses: Course[] = Array.from(db.courses.values());
+    const allCourses = (await db.courses.values()) as Course[];
+    const completedCourses: Course[] = allCourses.slice(0, 6);
+    const targetProgramCourses: Course[] = allCourses;
 
     const sim = whatIfSimulator.simulateProgramSwitch(
       profile.programId,
@@ -232,10 +235,10 @@ export async function simulateWhatIf(targetProgramId: string, studentId: string 
 // 6. Fees, Ledger & 48-Hour Provisional Pass
 export async function getFeeTransactions(studentId: string = "usr-stu-01"): Promise<ServerActionResponse> {
   try {
-    const profile = Array.from(db.studentProfiles.values()).find((p) => p.userId === studentId || p.id === studentId);
+    const profile = (await db.studentProfiles.values()).find((p) => p.userId === studentId || p.id === studentId);
     const targetId = profile ? profile.id : studentId;
 
-    const txs = Array.from(db.paymentTransactions.values())
+    const txs = (await db.paymentTransactions.values())
       .filter((t) => t.studentId === studentId || t.studentId === targetId)
       .map((t) => ({
         id: t.id,
@@ -253,11 +256,13 @@ export async function getFeeTransactions(studentId: string = "usr-stu-01"): Prom
 export async function payFeeTransaction(transactionId: string, studentId: string = "usr-stu-01"): Promise<ServerActionResponse> {
   try {
     const valid = feePaymentSchema.parse({ transactionId, studentId });
-    const tx = db.paymentTransactions.get(valid.transactionId);
+    const allTxs = await db.paymentTransactions.values();
+    const tx = allTxs.find((t) => t.id === valid.transactionId || t.orderId === valid.transactionId);
     if (!tx) return { success: false, error: "Transaction not found" };
 
     tx.status = "CAPTURED";
     tx.updatedAt = new Date();
+    await db.paymentTransactions.set(tx.orderId, tx);
     return { success: true, data: { message: "Payment processed successfully via Razorpay UPI", transaction: tx } };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -267,10 +272,10 @@ export async function payFeeTransaction(transactionId: string, studentId: string
 export async function requestProvisionalPass(reason: string, studentId: string = "usr-stu-01"): Promise<ServerActionResponse> {
   try {
     const valid = provisionalPassSchema.parse({ studentId, reason });
-    const profile = Array.from(db.studentProfiles.values()).find((p) => p.userId === valid.studentId || p.id === valid.studentId);
+    const profile = (await db.studentProfiles.values()).find((p) => p.userId === valid.studentId || p.id === valid.studentId);
     const targetStudentId = profile ? profile.id : valid.studentId;
 
-    const pass = provisionalHallTicketService.issueProvisionalPass({
+    const pass = await provisionalHallTicketService.issueProvisionalPass({
       studentId: targetStudentId,
       examId: "EXAM-FALL-2025",
       utrReferenceNumber: `UTR-${Date.now()}`,
@@ -286,7 +291,7 @@ export async function requestProvisionalPass(reason: string, studentId: string =
 // 7. Library Browser & Loans
 export async function getLibraryBooks(): Promise<ServerActionResponse> {
   try {
-    const books = Array.from(db.libraryBooks.values()).map((b) => ({
+    const books = (await db.libraryBooks.values()).map((b) => ({
       id: b.id,
       isbn: b.isbn,
       title: b.title,
@@ -305,10 +310,10 @@ export async function getLibraryBooks(): Promise<ServerActionResponse> {
 export async function borrowLibraryBook(bookId: string, borrowerId: string = "usr-stu-01"): Promise<ServerActionResponse> {
   try {
     const valid = libraryActionSchema.parse({ bookId, borrowerId });
-    const profile = Array.from(db.studentProfiles.values()).find((p) => p.userId === valid.borrowerId || p.id === valid.borrowerId);
+    const profile = (await db.studentProfiles.values()).find((p) => p.userId === valid.borrowerId || p.id === valid.borrowerId);
     const targetStudentId = profile ? profile.id : valid.borrowerId;
 
-    const loan = libraryService.issueBook(valid.bookId, targetStudentId);
+    const loan = await libraryService.issueBook(valid.bookId, targetStudentId);
     return { success: true, data: loan };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -318,7 +323,7 @@ export async function borrowLibraryBook(bookId: string, borrowerId: string = "us
 // 8. Leaves & Grievance Redressal
 export async function getLeaveApplications(userId: string = "usr-stu-01"): Promise<ServerActionResponse> {
   try {
-    const leaves = Array.from(db.leaveApplications.values())
+    const leaves = (await db.leaveApplications.values())
       .filter((l) => l.applicantId === userId)
       .map((l) => ({
         id: l.id,
@@ -356,7 +361,7 @@ export async function submitLeave(data: {
     });
 
     if (valid.applicantRole === "STUDENT") {
-      const res = leaveService.applyStudentLeave({
+      const res = await leaveService.applyStudentLeave({
         studentId: valid.applicantId,
         leaveType: valid.leaveType as any,
         startDate: valid.startDate,
@@ -365,7 +370,7 @@ export async function submitLeave(data: {
       });
       return { success: true, data: res };
     } else {
-      const res = leaveService.applyFacultyLeave({
+      const res = await leaveService.applyFacultyLeave({
         facultyId: valid.applicantId,
         leaveType: valid.leaveType as any,
         startDate: valid.startDate,
@@ -399,7 +404,7 @@ export async function submitGrievance(data: {
       INFRASTRUCTURE: "HOSTEL_INFRASTRUCTURE",
     };
 
-    const res = grievanceService.fileGrievance({
+    const res = await grievanceService.fileGrievance({
       complainantId: valid.complainantId,
       isAnonymous: valid.isAnonymous,
       category: categoryMap[valid.category] || "ACADEMIC",
@@ -415,7 +420,7 @@ export async function submitGrievance(data: {
 // 9. Notifications Center
 export async function getNotifications(userId: string = "usr-stu-01"): Promise<ServerActionResponse> {
   try {
-    const notifs = notificationCenter.getInbox(userId);
+    const notifs = await notificationCenter.getInbox(userId);
     return { success: true, data: notifs };
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -424,7 +429,7 @@ export async function getNotifications(userId: string = "usr-stu-01"): Promise<S
 
 export async function markNotificationAsRead(id: string, userId: string = "usr-stu-01"): Promise<ServerActionResponse> {
   try {
-    const notif = notificationCenter.markAsRead(id, userId);
+    const notif = await notificationCenter.markAsRead(id, userId);
     return { success: true, data: notif };
   } catch (err: any) {
     return { success: false, error: err.message };
