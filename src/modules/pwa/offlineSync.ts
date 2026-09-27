@@ -1,4 +1,5 @@
 import { signVerifiableDocument } from '../../lib/crypto.js';
+import { addDaysToDateKey, toIstDateKey } from '../../lib/time.js';
 
 /**
  * Module 10: Mobile PWA Offline Data Sync Engine
@@ -43,7 +44,7 @@ export class OfflineSyncService {
     fullName: string,
     programName: string
   ): OfflineStudentIdCard {
-    const validUntil = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const validUntil = addDaysToDateKey(toIstDateKey(), 365);
     const dataToSign = {
       studentId,
       rollNumber,

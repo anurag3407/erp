@@ -3,6 +3,7 @@ import { db } from '../../lib/db.js';
 import { dynamicQrEngine } from './dynamicQrEngine.js';
 import { geofenceService, type Coordinates } from './geofence.js';
 import { webAuthnBindingService } from './webauthnService.js';
+import { toIstDateKey } from '../../lib/time.js';
 import type { AttendanceRecord } from '../../types/index.js';
 
 /**
@@ -23,6 +24,8 @@ export interface MarkAttendanceRequest {
   clientDataJSON?: string;
   biometricSignature?: string;
   timestampMs?: number;
+  sessionId?: string;
+  periodNumber?: number;
 }
 
 export interface MarkAttendanceResult {
@@ -81,14 +84,26 @@ export class AttendanceService {
       }
     }
 
-    // 4. Duplicate Check: Prevent marking multiple times for the same lecture session on the same day
-    const sessionDateStr = new Date(now).toISOString().split('T')[0];
-    const duplicate = (await db.attendanceRecords.values()).find(
-      (r) =>
-        r.studentId === req.studentId &&
-        r.offeringId === req.offeringId &&
-        r.timestamp.toISOString().split('T')[0] === sessionDateStr
-    );
+    // 4. Duplicate Check (C1 fix: distinguish multiple sessions/periods of the same course on the same day)
+    const sessionDateStr = toIstDateKey(now);
+    const duplicate = (await db.attendanceRecords.values()).find((r) => {
+      if (r.studentId !== req.studentId || r.offeringId !== req.offeringId) return false;
+      // If explicit sessionId provided, match exact session
+      if (req.sessionId && r.sessionId) {
+        return r.sessionId === req.sessionId;
+      }
+      // If explicit periodNumber provided, match same day + same period
+      if (req.periodNumber != null && r.periodNumber != null) {
+        return toIstDateKey(r.timestamp) === sessionDateStr && r.periodNumber === req.periodNumber;
+      }
+      // Fallback: match same day only if punches occurred within the same 45-minute lecture block
+      if (toIstDateKey(r.timestamp) === sessionDateStr) {
+        const timeDiffMs = Math.abs(new Date(r.timestamp).getTime() - now);
+        return timeDiffMs < 45 * 60 * 1000;
+      }
+      return false;
+    });
+
     if (duplicate) {
       return {
         success: true,
@@ -111,6 +126,8 @@ export class AttendanceService {
       longitude: req.studentCoords.longitude,
       distanceMeters: geoCheck.distanceMeters,
       deviceId: req.credentialId,
+      sessionId: req.sessionId,
+      periodNumber: req.periodNumber,
     };
     await db.attendanceRecords.set(recordId, newRecord);
 

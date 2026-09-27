@@ -58,15 +58,18 @@ export function sha256(payload: string): string {
 
 /**
  * Compute Payment Idempotency Key
- * Formula: SHA256(student_id || fee_structure_id || semester || amount)
+ * Formula: SHA256(student_id || fee_structure_id || semester || amount [|| sequence_or_order_id])
+ * Supports distinct instalment transactions of identical amount in the same semester.
  */
 export function computePaymentIdempotencyKey(
   studentId: string,
   feeStructureId: string,
   semester: number,
-  amount: number
+  amount: number,
+  sequenceOrOrderId?: string | number
 ): string {
-  return sha256(`${studentId}:${feeStructureId}:${semester}:${amount.toFixed(2)}`);
+  const base = `${studentId}:${feeStructureId}:${semester}:${amount.toFixed(2)}`;
+  return sha256(sequenceOrOrderId != null ? `${base}:${sequenceOrOrderId}` : base);
 }
 
 /**

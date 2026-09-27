@@ -5,6 +5,10 @@ import {
   validatePasswordPolicy,
   AuthService,
   sessionStore,
+  sessionKeyFor,
+  sendEmail,
+  renderPasswordResetEmail,
+  isEmailConfigured,
   authService,
   loginThrottle,
   MAX_FAILED_ATTEMPTS,
@@ -217,10 +221,63 @@ export async function runAuthTests(): Promise<void> {
     'Reset tokens must be single-use'
   );
 
+  // 10. Profile session management
+  console.log('Test A.10: Profile Session Management');
+  const m1 = await sessionStore.create({ userId: TEST_USER_ID, role: 'STUDENT', email: TEST_EMAIL, name: 'x' });
+  const m2 = await sessionStore.create({ userId: TEST_USER_ID, role: 'STUDENT', email: TEST_EMAIL, name: 'x' });
+  const m3 = await sessionStore.create({ userId: TEST_USER_ID, role: 'STUDENT', email: TEST_EMAIL, name: 'x' });
+
+  const listed = await sessionStore.listForUser(TEST_USER_ID);
+  assert.ok(listed.length >= 3, 'listForUser must return all active sessions');
+  assert.notStrictEqual(
+    sessionKeyFor(m1.id),
+    m1.id,
+    'Public session key must not be the raw session token'
+  );
+  assert.strictEqual(sessionKeyFor(m2.id), sessionKeyFor(m2.id), 'Session key must be stable');
+
+  const revokedByKey = await sessionStore.destroyByKey(TEST_USER_ID, sessionKeyFor(m1.id));
+  assert.strictEqual(revokedByKey, true, 'destroyByKey must revoke the matching session');
+  assert.strictEqual(await sessionStore.get(m1.id), null, 'Revoked session must be gone');
+  assert.strictEqual(
+    await sessionStore.destroyByKey(TEST_USER_ID, 'not-a-real-key'),
+    false,
+    'destroyByKey must reject unknown keys'
+  );
+
+  const othersRemoved = await sessionStore.destroyOthersForUser(TEST_USER_ID, m2.id);
+  assert.ok(othersRemoved >= 1, 'destroyOthersForUser must revoke other sessions');
+  assert.ok(await sessionStore.get(m2.id), 'Kept session must survive');
+  assert.strictEqual(await sessionStore.get(m3.id), null, 'Other session must be revoked');
+  await sessionStore.destroyAllForUser(TEST_USER_ID);
+
+  // 11. Transactional email delivery
+  console.log('Test A.11: Transactional Email Delivery');
+  if (!isEmailConfigured()) {
+    const delivery = await sendEmail({
+      to: 'nobody@example.edu',
+      subject: 'test',
+      html: '<p>hello</p>',
+    });
+    assert.strictEqual(delivery.delivered, false, 'Unconfigured mailer must not claim delivery');
+    assert.strictEqual(
+      delivery.error,
+      'EMAIL_NOT_CONFIGURED',
+      'Unconfigured mailer must report the reason instead of throwing'
+    );
+  }
+  const resetHtml = renderPasswordResetEmail(
+    'Rohit <script>alert(1)</script>',
+    'https://erp.example.edu/reset-password?token=abc123'
+  );
+  assert.ok(resetHtml.includes('token=abc123'), 'Reset email must contain the reset link');
+  assert.ok(resetHtml.includes('&lt;script&gt;'), 'Recipient name must be HTML-escaped');
+  assert.strictEqual(resetHtml.includes('<script>'), false, 'Raw script tags must never appear');
+
   // Cleanup test accounts.
   await db.users.delete(TEST_USER_ID);
   await db.users.delete(created.userId);
   await loginThrottle.clear([throttleEmail, newEmail, TEST_EMAIL]);
 
-  console.log('=== ALL AUTHENTICATION & SESSION TESTS PASSED (9/9) ===');
+  console.log('=== ALL AUTHENTICATION & SESSION TESTS PASSED (11/11) ===');
 }

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { db } from '../../lib/db.js';
+import { daysBetweenDateKeys, enumerateDateKeys, toIstDateKey } from '../../lib/time.js';
 import type {
   AcademicTerm,
   CalendarEvent,
@@ -141,22 +142,18 @@ export class AcademicCalendarService {
     const events = await this.getEventsForTerm(termId);
     const holidays = events.filter((e) => e.eventType === 'HOLIDAY');
 
-    const totalDays = Math.ceil((term.endDate.getTime() - term.startDate.getTime()) / 86400000);
+    const startKey = toIstDateKey(term.startDate);
+    const endKey = toIstDateKey(term.endDate);
+    const totalDays = Math.max(0, daysBetweenDateKeys(startKey, endKey) + 1);
+
+    const holidayDates = new Set(holidays.map((h) => toIstDateKey(h.startDate)));
+
     let instructionalCount = 0;
-    const cur = new Date(term.startDate);
-    const end = new Date(term.endDate);
-
-    const holidayDates = new Set(
-      holidays.map((h) => h.startDate.toISOString().split('T')[0])
-    );
-
-    while (cur <= end) {
-      const day = cur.getUTCDay();
-      const dateStr = cur.toISOString().split('T')[0];
-      if (day !== 0 && !holidayDates.has(dateStr)) {
+    for (const dateKey of enumerateDateKeys(startKey, endKey)) {
+      const weekday = new Date(`${dateKey}T00:00:00Z`).getUTCDay();
+      if (weekday !== 0 && !holidayDates.has(dateKey)) {
         instructionalCount++;
       }
-      cur.setUTCDate(cur.getUTCDate() + 1);
     }
 
     return {

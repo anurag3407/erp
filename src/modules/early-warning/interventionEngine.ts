@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { db } from '../../lib/db.js';
+import { toIstDateKey } from '../../lib/time.js';
 import type { StudentRiskIndicator, MentorInterventionCase } from '../../types/index.js';
 
 /**
@@ -56,7 +57,7 @@ export class InterventionWorkflowEngine {
       ticketCreated: true,
       interventionCase,
       parentNotificationSent: true,
-      message: `HIGH_RISK_ALERT: Intervention ticket ${caseId} created for mentor. 7-day SLA ends on ${slaDeadline.toISOString().split('T')[0]}. Parent notified.`,
+      message: `HIGH_RISK_ALERT: Intervention ticket ${caseId} created for mentor. 7-day SLA ends on ${toIstDateKey(slaDeadline)}. Parent notified.`,
     };
   }
 

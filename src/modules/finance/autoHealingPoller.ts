@@ -42,8 +42,11 @@ export class AutoHealingPaymentPoller {
 
         if (mockGatewayLookup) {
           gatewayResult = await mockGatewayLookup(tx.orderId);
+        } else if (process.env.NODE_ENV === 'production') {
+          // In production without an active gateway client, fail closed
+          gatewayResult = { status: 'unpaid', paymentId: '', utr: '' };
         } else {
-          // Default mock poller behavior: if UTR is attached, mark paid
+          // Development/test mock poller behavior
           gatewayResult = {
             status: 'paid',
             paymentId: `pay_${tx.orderId}`,
@@ -52,7 +55,7 @@ export class AutoHealingPaymentPoller {
         }
 
         if (gatewayResult.status === 'paid') {
-          await webhookIdempotencyService.handlePaymentWebhook({
+          const webhookResult = await webhookIdempotencyService.handlePaymentWebhook({
             event: 'payment.captured',
             orderId: tx.orderId,
             paymentId: gatewayResult.paymentId,
@@ -63,10 +66,15 @@ export class AutoHealingPaymentPoller {
             utrReferenceNumber: gatewayResult.utr,
           });
 
-          tx.status = 'RECONCILED_BY_POLLER';
-          await db.paymentTransactions.set(tx.orderId, tx);
-          healedCount++;
-          healedOrderIds.push(tx.orderId);
+          // C15 fix: Only mark as reconciled if webhook processor confirmed or deduplicated
+          if (webhookResult.status === 'PROCESSED' || webhookResult.status === 'DUPLICATE_IGNORED') {
+            tx.status = 'RECONCILED_BY_POLLER';
+            await db.paymentTransactions.set(tx.orderId, tx);
+            healedCount++;
+            healedOrderIds.push(tx.orderId);
+          } else {
+            failedCount++;
+          }
         } else if (gatewayResult.status === 'failed') {
           tx.status = 'FAILED';
           await db.paymentTransactions.set(tx.orderId, tx);

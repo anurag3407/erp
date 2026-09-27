@@ -419,6 +419,17 @@ export default function ERPDashboard() {
                 <p className="font-semibold text-slate-800">{role === "Student" ? "Alex Rivera" : "Dr. Alan Turing"}</p>
                 <p className="text-slate-500">{role}</p>
               </div>
+              <a href="/profile" className="text-xs font-medium text-indigo-600 hover:underline">
+                Profile
+              </a>
+              {role === "Admin" && (
+                <a
+                  href="/admin/users"
+                  className="text-xs font-medium text-indigo-600 hover:underline"
+                >
+                  Users
+                </a>
+              )}
               <button
                 onClick={handleLogout}
                 className="text-xs font-medium text-slate-500 hover:text-slate-800 px-2 py-1 rounded-md hover:bg-slate-100"

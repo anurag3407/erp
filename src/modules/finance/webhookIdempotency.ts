@@ -17,6 +17,7 @@ export interface WebhookEventPayload {
   semester: number;
   amount: number;
   utrReferenceNumber?: string;
+  instalmentSequence?: number;
 }
 
 export interface WebhookProcessingResult {
@@ -33,8 +34,14 @@ export class WebhookIdempotencyService {
   async handlePaymentWebhook(payload: WebhookEventPayload): Promise<WebhookProcessingResult> {
     const { orderId, paymentId, studentId, feeStructureId, semester, amount, utrReferenceNumber } = payload;
 
-    // 1. Compute deterministic idempotency key
-    const idempotencyKey = computePaymentIdempotencyKey(studentId, feeStructureId, semester, amount);
+    // 1. Compute deterministic idempotency key (scoped by instalment or orderId to prevent false duplicate collisions)
+    const idempotencyKey = computePaymentIdempotencyKey(
+      studentId,
+      feeStructureId,
+      semester,
+      amount,
+      payload.instalmentSequence ?? orderId
+    );
 
     // 2. Check if already processed
     const processedRecordKey = `payment:processed:${idempotencyKey}`;

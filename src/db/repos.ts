@@ -196,7 +196,30 @@ const users = new SqlStore<any>({
 
 const studentProfiles = new SqlStore<any>({
   table: 'student_profiles',
-  columns: ['id', 'user_id', 'roll_number', 'apaar_id', 'program_id', 'current_semester', 'admission_year', 'academic_status', 'mentor_id', 'cgpa', 'total_earned_credits', 'nep_exit_level'],
+  columns: [
+    'id',
+    'user_id',
+    'roll_number',
+    'apaar_id',
+    'prn',
+    'enrolment_number',
+    'category',
+    'gender',
+    'dob',
+    'phone',
+    'quota',
+    'domicile_state',
+    'is_pwd',
+    'is_first_graduate',
+    'program_id',
+    'current_semester',
+    'admission_year',
+    'academic_status',
+    'mentor_id',
+    'cgpa',
+    'total_earned_credits',
+    'nep_exit_level',
+  ],
   conflictColumns: ['id'],
 });
 
@@ -227,7 +250,20 @@ const waitlists = new SqlStore<any>({
 
 const attendanceRecords = new SqlStore<any>({
   table: 'attendance_records',
-  columns: ['id', 'student_id', 'offering_id', 'timestamp', 'status', 'verification_method', 'latitude', 'longitude', 'distance_meters', 'device_id'],
+  columns: [
+    'id',
+    'student_id',
+    'offering_id',
+    'timestamp',
+    'status',
+    'verification_method',
+    'latitude',
+    'longitude',
+    'distance_meters',
+    'device_id',
+    'session_id',
+    'period_number',
+  ],
   conflictColumns: ['id'],
 });
 

@@ -121,6 +121,16 @@ export async function seedDatabase(): Promise<void> {
        'QA76.73.C15 K47', 5, 5, 'dept-cse')
     ON CONFLICT (id) DO NOTHING
   `;
+
+  // 9. Fee Structures (C12 fix: seed real fee structures so FKs to fee_structures never fail)
+  await sql`
+    INSERT INTO fee_structures (
+      id, program_id, academic_year, semester, fee_head, amount
+    ) VALUES
+      ('fee-struct-01',       'prog-btech-cse', '2025-2026', 4, 'TUITION',      45000.00),
+      ('fee-struct-lib-fine', 'prog-btech-cse', '2025-2026', 4, 'LIBRARY_FINE',     0.00)
+    ON CONFLICT (id) DO NOTHING
+  `;
 }
 
 /** Truncate + reseed. Used by the seed script and test harness. */

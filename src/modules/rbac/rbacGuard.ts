@@ -338,6 +338,17 @@ export class RbacGuard {
     },
   ];
 
+  private readonly publicRoutes: RegExp[] = [
+    /^\/api\/auth(\/.*)?$/,
+    /^\/api\/health$/,
+    /^\/api\/public(\/.*)?$/,
+    /^\/verify(\/.*)?$/,
+    /^\/login$/,
+    /^\/forgot-password$/,
+    /^\/reset-password$/,
+    /^\/$/,
+  ];
+
   /**
    * Check if role has a specific permission
    */
@@ -354,7 +365,9 @@ export class RbacGuard {
   }
 
   /**
-   * Authorize a route path for a given institutional role
+   * Authorize a route path for a given institutional role.
+   * Enforces fail-closed security (C9): any route without an explicit rule
+   * and not on the public allowlist is denied by default.
    */
   authorizeRoute(role: UserRole, path: string, method?: string): RbacAuthResult {
     // 1. Super Admin bypass
@@ -362,11 +375,20 @@ export class RbacGuard {
       return { authorized: true, role };
     }
 
-    // 2. Find matching route rule
+    // 2. Check public allowlist
+    if (this.publicRoutes.some((pattern) => pattern.test(path))) {
+      return { authorized: true, role };
+    }
+
+    // 3. Find matching route rule
     const rule = this.routeRules.find((r) => r.pathPattern.test(path));
     if (!rule) {
-      // Unrestricted / default authenticated route
-      return { authorized: true, role };
+      // Fail closed: No rule defined for this route
+      return {
+        authorized: false,
+        role,
+        reason: `DEFAULT_DENY: No RBAC route rule defined for ${path}`,
+      };
     }
 
     // 3. Verify role

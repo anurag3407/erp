@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { redis } from '../../lib/redis.js';
+import { sha256 } from '../../lib/crypto.js';
 
 /**
  * Redis-backed auth sessions.
@@ -80,6 +81,26 @@ export class SessionStore {
   }
 
   /**
+   * List every active session belonging to a user (for profile / session
+   * management). Includes the current session.
+   */
+  async listForUser(userId: string): Promise<SessionRecord[]> {
+    const keys = await redis.keys('erp:session:*');
+    const sessions: SessionRecord[] = [];
+    for (const key of keys) {
+      const raw = await redis.get(key);
+      if (!raw) continue;
+      try {
+        const record = JSON.parse(raw) as SessionRecord;
+        if (record.userId === userId) sessions.push(record);
+      } catch {
+        // Ignore malformed entries.
+      }
+    }
+    return sessions.sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+  }
+
+  /**
    * Revoke every session belonging to a user (e.g. password change, forced
    * logout, or suspected compromise).
    */
@@ -101,6 +122,60 @@ export class SessionStore {
     }
     return removed;
   }
+
+  /**
+   * Revoke all of a user's sessions except the one currently in use — the
+   * "sign out everywhere else" action.
+   */
+  async destroyOthersForUser(userId: string, keepSessionId: string): Promise<number> {
+    const keys = await redis.keys('erp:session:*');
+    let removed = 0;
+    for (const key of keys) {
+      const raw = await redis.get(key);
+      if (!raw) continue;
+      try {
+        const record = JSON.parse(raw) as SessionRecord;
+        if (record.userId === userId && record.id !== keepSessionId) {
+          await redis.del(key);
+          removed += 1;
+        }
+      } catch {
+        // Ignore malformed entries.
+      }
+    }
+    return removed;
+  }
+
+  /**
+   * Revoke one of a user's own sessions by its public reference key (a hash of
+   * the session id). Raw session tokens are never exposed to callers, so a
+   * leaked UI response cannot be replayed as a cookie.
+   */
+  async destroyByKey(userId: string, sessionKey: string): Promise<boolean> {
+    const keys = await redis.keys('erp:session:*');
+    for (const key of keys) {
+      const raw = await redis.get(key);
+      if (!raw) continue;
+      try {
+        const record = JSON.parse(raw) as SessionRecord;
+        if (record.userId === userId && sessionKeyFor(record.id) === sessionKey) {
+          await redis.del(key);
+          return true;
+        }
+      } catch {
+        // Ignore malformed entries.
+      }
+    }
+    return false;
+  }
+}
+
+/**
+ * Public, non-reversible reference for a session id. Lets the profile UI list
+ * and target sessions without ever handling the raw cookie token.
+ */
+export function sessionKeyFor(sessionId: string): string {
+  return sha256(sessionId).slice(0, 32);
 }
 
 export const sessionStore = new SessionStore();

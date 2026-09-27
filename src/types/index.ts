@@ -34,7 +34,17 @@ export interface StudentProfile {
   id: string;
   userId: string;
   rollNumber: string;
-  apaarId: string; // India DigiLocker / ABC ID
+  apaarId?: string; // India DigiLocker / ABC ID (nullable)
+  prn?: string; // University Permanent Registration Number
+  enrolmentNumber?: string;
+  category?: 'GEN' | 'OBC' | 'SC' | 'ST' | 'EWS' | string;
+  gender?: 'MALE' | 'FEMALE' | 'OTHER';
+  dob?: string;
+  phone?: string;
+  quota?: 'GOVT' | 'MANAGEMENT' | 'SPORTS' | 'NRI' | string;
+  domicileState?: string;
+  isPwD?: boolean;
+  isFirstGraduate?: boolean;
   programId: string;
   currentSemester: number;
   admissionYear: number;
@@ -111,6 +121,8 @@ export interface AttendanceRecord {
   longitude?: number;
   distanceMeters?: number;
   deviceId?: string;
+  sessionId?: string;
+  periodNumber?: number;
 }
 
 export interface ExamSeat {

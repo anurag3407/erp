@@ -4,6 +4,10 @@ import {
   db,
   authService,
   rbacGuard,
+  sessionStore,
+  sessionKeyFor,
+  sendEmail,
+  renderPasswordResetEmail,
   attendanceService,
   courseCheckoutService,
   curriculumDagEngine,
@@ -178,6 +182,59 @@ export async function listUsers(): Promise<ServerActionResponse> {
   }
 }
 
+export async function getMySessions(): Promise<ServerActionResponse> {
+  try {
+    const actor = await authorizeAction("/api/self/sessions");
+    const currentId = await getSessionId();
+    const sessions = await sessionStore.listForUser(actor.userId);
+    return {
+      success: true,
+      data: sessions.map((s) => ({
+        key: sessionKeyFor(s.id),
+        createdAt: s.createdAt,
+        lastSeenAt: s.lastSeenAt,
+        current: s.id === currentId,
+      })),
+    };
+  } catch (err: any) {
+    return { success: false, error: toClientError(err, "Failed to load sessions") };
+  }
+}
+
+export async function revokeSession(sessionKey: string): Promise<ServerActionResponse> {
+  try {
+    const actor = await authorizeAction("/api/self/sessions");
+    const currentId = await getSessionId();
+    const sessions = await sessionStore.listForUser(actor.userId);
+    const target = sessions.find((s) => sessionKeyFor(s.id) === sessionKey);
+    if (!target) {
+      return { success: false, error: "SESSION_NOT_FOUND: No such session for this account" };
+    }
+    await sessionStore.destroy(target.id);
+    const revokedCurrent = target.id === currentId;
+    if (revokedCurrent) {
+      await clearSessionCookie();
+    }
+    return { success: true, data: { revokedCurrent } };
+  } catch (err: any) {
+    return { success: false, error: toClientError(err, "Failed to revoke session") };
+  }
+}
+
+export async function revokeOtherSessions(): Promise<ServerActionResponse> {
+  try {
+    const actor = await authorizeAction("/api/self/sessions");
+    const currentId = await getSessionId();
+    if (!currentId) {
+      return { success: false, error: "UNAUTHENTICATED: You must sign in to perform this action" };
+    }
+    const revokedCount = await sessionStore.destroyOthersForUser(actor.userId, currentId);
+    return { success: true, data: { revokedCount } };
+  } catch (err: any) {
+    return { success: false, error: toClientError(err, "Failed to revoke sessions") };
+  }
+}
+
 export async function changePassword(
   currentPassword: string,
   newPassword: string
@@ -204,10 +261,22 @@ export async function requestPasswordReset(email: string): Promise<ServerActionR
     const data: Record<string, unknown> = {
       message: "If that account exists, a reset link has been sent.",
     };
-    if (result && process.env.NODE_ENV !== "production") {
-      // Without a configured mail/SMS provider, surface the token in dev only.
-      data.developmentResetToken = result.token;
+
+    if (result) {
+      const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/+$/, "");
+      const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(result.token)}`;
+      const delivery = await sendEmail({
+        to: result.email,
+        subject: "Reset your Nexus ERP password",
+        html: renderPasswordResetEmail(result.name, resetUrl),
+      });
+      if (!delivery.delivered && process.env.NODE_ENV !== "production") {
+        // No mail provider configured (or delivery failed) — expose the token
+        // locally so the flow remains usable during development.
+        data.developmentResetToken = result.token;
+      }
     }
+
     return { success: true, data };
   } catch (err: any) {
     return { success: false, error: toClientError(err, "Failed to request password reset") };

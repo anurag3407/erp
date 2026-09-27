@@ -66,7 +66,17 @@ export const studentProfiles = pgTable('student_profiles', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   rollNumber: text('roll_number').notNull().unique(),
-  apaarId: text('apaar_id').notNull().unique(), // DigiLocker / ABC ID
+  apaarId: text('apaar_id').unique(), // DigiLocker / ABC ID (nullable to allow onboarding without APAAR)
+  prn: text('prn').unique(), // University Permanent Registration Number
+  enrolmentNumber: text('enrolment_number'),
+  category: text('category'), // GEN, OBC, SC, ST, EWS
+  gender: text('gender'),
+  dob: text('dob'),
+  phone: text('phone'),
+  quota: text('quota'), // GOVT, MANAGEMENT, SPORTS, NRI
+  domicileState: text('domicile_state'),
+  isPwD: boolean('is_pwd').notNull().default(false),
+  isFirstGraduate: boolean('is_first_graduate').notNull().default(false),
   programId: text('program_id').notNull().references(() => programs.id, { onDelete: 'cascade' }),
   currentSemester: integer('current_semester').notNull().default(1),
   admissionYear: integer('admission_year').notNull(),

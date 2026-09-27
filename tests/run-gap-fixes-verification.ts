@@ -9,6 +9,8 @@ import { runOperationalGapsTests } from './unit/operational-gaps.test.js';
 import { runEdgeCaseTests } from './unit/edge-cases.test.js';
 import { runAuthTests } from './unit/auth.test.js';
 import { runRbacEnforcementTests } from './unit/rbac-enforcement.test.js';
+import { runIstTimeTests } from './unit/ist-time.test.js';
+import { runIndiaComplianceP0Tests } from './unit/india-compliance-p0.test.js';
 import { runIntegrationTests } from './integration/concurrency.test.js';
 import { runE2EWorkflowTests } from './e2e/e2e-workflow.test.js';
 import { runGapVerificationScanner } from './gap-scanner.js';
@@ -29,6 +31,8 @@ async function main() {
   let unitPassed = false;
   let authPassed = false;
   let rbacPassed = false;
+  let istPassed = false;
+  let p0Passed = false;
   let operationalPassed = false;
   let edgePassed = false;
   let integrationPassed = false;
@@ -47,6 +51,14 @@ async function main() {
     // 1c. Server-action RBAC Enforcement Suite
     await runRbacEnforcementTests();
     rbacPassed = true;
+
+    // 1d. Institutional Timezone (IST) Suite
+    await runIstTimeTests();
+    istPassed = true;
+
+    // 1e. India Compliance & P0 Remediation Suite (C1, C2, C5, C10, C12, C13, C15, A6)
+    await runIndiaComplianceP0Tests();
+    p0Passed = true;
 
     // 2. 9 Operational Gaps Verification Suite
     await runOperationalGapsTests();
@@ -79,8 +91,10 @@ async function main() {
     console.log(`║ 4. Integration & Stress Suite (5,000 CUs):       [ ${integrationPassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
     console.log(`║ 5. End-to-End Lifecycle Workflow (11 Steps):     [ ${e2ePassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
     console.log(`║ 6. Competitive Gap Scanner (19 Modules):         [ ${gapScannerPassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
-    console.log(`║ 7. Authentication & Session Suite (9 Cases):     [ ${authPassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
-    console.log(`║ 8. Server-Action RBAC Enforcement (5 Cases):     [ ${rbacPassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
+    console.log(`║ 7. Authentication & Session Suite (11 Cases):    [ ${authPassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
+    console.log(`║ 8. Server-Action RBAC Enforcement (6 Cases):     [ ${rbacPassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
+    console.log(`║ 9. Institutional Timezone / IST Suite (4 Cases): [ ${istPassed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
+    console.log(`║ 10. India Compliance & P0 Suite (5 Cases):       [ ${p0Passed ? 'PASSED 100%' : 'FAILED'} ]               ║`);
     console.log('╠════════════════════════════════════════════════════════════════════════════╣');
     console.log(`║ TOTAL ELAPSED TIME: ${masterDuration.toFixed(2)}ms                                              ║`);
     console.log('║ FINAL STATUS: 100% PASSING - ALL 9 OPERATIONAL GAPS CLOSED                 ║');

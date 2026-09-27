@@ -9,6 +9,8 @@ export * from './types/index.js';
 // Infrastructure & Primitives
 export * from './lib/crypto.js';
 export * from './lib/password.js';
+export * from './lib/time.js';
+export * from './lib/mailer.js';
 export * from './lib/redis.js';
 export * from './lib/db.js';
 
@@ -29,6 +31,7 @@ export * from './modules/attendance/geofence.js';
 export * from './modules/attendance/webauthnService.js';
 export * from './modules/attendance/biometricWebhook.js';
 export * from './modules/attendance/attendanceService.js';
+export * from './modules/attendance/attendanceAnalytics.js';
 
 // Module 3: Graph-Based Degree Audit & NEP 2020 Engine
 export * from './modules/degree-audit/curriculumDag.js';

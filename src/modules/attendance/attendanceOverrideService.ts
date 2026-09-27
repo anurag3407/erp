@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { db, withTransaction } from '../../lib/db.js';
+import { toIstDateKey } from '../../lib/time.js';
 import type {
   AttendanceRecord,
   AttendanceOverrideReasonCode,
@@ -132,7 +133,7 @@ export class AttendanceOverrideService {
 
     const matchingRecords = (await db.attendanceRecords.values()).filter((rec) => {
       if (rec.studentId !== leave.applicantId) return false;
-      const recDateStr = rec.timestamp.toISOString().split('T')[0];
+      const recDateStr = toIstDateKey(rec.timestamp);
       const inRange = recDateStr >= leave.startDate && recDateStr <= leave.endDate;
       return inRange && rec.status !== 'PRESENT';
     });

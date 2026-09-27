@@ -1,4 +1,5 @@
 import type { RiskLevel, StudentRiskIndicator } from '../../types/index.js';
+import { toIstDateKey } from '../../lib/time.js';
 
 /**
  * Module 7: Academic Risk Scoring (ARS) Calculator
@@ -51,7 +52,7 @@ export class ArsCalculator {
 
     return {
       studentId: input.studentId,
-      calculationDate: new Date().toISOString().split('T')[0],
+      calculationDate: toIstDateKey(),
       attendancePct: input.attendancePct,
       ciaScorePct: input.ciaScorePct,
       lmsActivityScore: Math.round((100 - lmsInactivityNormalized) * 100) / 100,

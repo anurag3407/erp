@@ -66,6 +66,9 @@ export async function runRbacEnforcementTests(): Promise<void> {
   allow('SUPER_ADMIN', '/api/users/create', 'super admin provisions users');
   deny('STUDENT', '/api/users/create', 'student provisions users');
   deny('FACULTY', '/api/users/create', 'faculty provisions users');
+  allow('REGISTRAR', '/api/users/list', 'registrar lists users');
+  deny('COE', '/api/users/list', 'coe lists users');
+  deny('STUDENT', '/api/users/list', 'student lists users');
   deny('STUDENT', '/api/grades/lock', 'student locks grades');
   deny('STUDENT', '/api/finance/reconcile', 'student reconciles fees');
   deny('STUDENT', '/api/attendance/override', 'student overrides attendance');
@@ -74,5 +77,16 @@ export async function runRbacEnforcementTests(): Promise<void> {
   allow('SUPER_ADMIN', '/api/grades/lock', 'super admin lock');
   allow('SUPER_ADMIN', '/api/finance/reconcile', 'super admin reconcile');
 
-  console.log('=== ALL RBAC ENFORCEMENT TESTS PASSED (5/5) ===');
+  console.log('Test R.6: Fail-closed default-deny for unmapped routes (C9)');
+  // Any unmapped route must fail closed for standard roles
+  deny('STUDENT', '/api/unmapped/unknown-route', 'unmapped route for student');
+  deny('FACULTY', '/api/internal/debug-dump', 'unmapped internal endpoint for faculty');
+  deny('REGISTRAR', '/api/random/arbitrary/path', 'arbitrary route for registrar');
+  // Public allowlist endpoints must be permitted
+  allow('STUDENT', '/api/auth/login', 'public login endpoint');
+  allow('STUDENT', '/api/health', 'public health endpoint');
+  allow('PARENT', '/verify/doc-xyz', 'public verification endpoint');
+
+  console.log('=== ALL RBAC ENFORCEMENT TESTS PASSED (6/6) ===');
 }
+
